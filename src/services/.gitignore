@@ -1,0 +1,12 @@
+# 2. Crear .gitignore profesional para Frontend
+@"
+.env
+.venv/
+node_modules/
+__pycache__/
+*.pyc
+.DS_Store
+.vscode/
+dist/
+build/
+"@ | Out-File -Encoding utf8 .gitignore
