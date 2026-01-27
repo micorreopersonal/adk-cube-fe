@@ -6,7 +6,7 @@ from src.state import set_user
 
 def render_login():
     # Actualizamos el título para ser consistentes con la marca
-    st.markdown("### 🔒 Vertex AI Access")
+    st.markdown("### 🛡️ RIMAC | People Analytics")
     
     auth = AuthService()
     
