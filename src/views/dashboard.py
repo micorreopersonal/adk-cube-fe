@@ -26,18 +26,7 @@ def render_dashboard():
     st.title("🔴 Asistente de Gestión del Talento")
     st.markdown(f"Bienvenido/a **{user.name}**. Aquí tienes tu centro de comando para People Analytics.")
     
-    # --- SECCIÓN DE TOOLS (OCULTA POR AHORA) ---
-    # Comentamos la visualización de herramientas para limpiar la UI en el MVP.
-    # El código se mantiene para cuando actives las funcionalidades específicas.
-    """
-    my_tools = auth.get_allowed_tools(user.role)
-    cols = st.columns(len(my_tools)) if my_tools else []
-    for idx, tool in enumerate(my_tools):
-        with cols[idx]:
-            st.success(f"🛠️ {tool}")
-    """
 
-    st.divider()
 
     # --- HISTORIAL DE CHAT ---
     if "messages" not in st.session_state:
@@ -143,6 +132,3 @@ def render_dashboard():
                 with st.chat_message("assistant"):
                     st.markdown(ai_text)
             
-            # --- DEBUGGER ---
-            with st.expander("🛠️ Debug Backend JSON"):
-                st.json(response_data)
