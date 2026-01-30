@@ -6,16 +6,18 @@ import uuid
 
 class Visualizer:
     @staticmethod
-    def render(content: list):
+    def render(content: list, key_prefix: str = ""):
         """
         Renders a list of visual blocks.
         """
         if not content:
             return
 
-        for block in content:
+        for idx, block in enumerate(content):
             block_type = block.get("type")
             payload = block.get("payload")
+            # Unique key for this block instance
+            block_key = f"{key_prefix}_{idx}"
             
             if block_type == "text":
                 variant = block.get("variant", "standard")
@@ -37,42 +39,60 @@ class Visualizer:
                 Visualizer._render_kpis(payload)
                 
             elif block_type == "plot":
-                Visualizer._render_plot(block)
+                Visualizer._render_plot(block, key_prefix=block_key)
                 
             elif block_type == "table":
-                Visualizer._render_table(payload)
+                Visualizer._render_table(payload, key_prefix=block_key)
             
             elif block_type == "data_series":
                 metadata = block.get("metadata", {})
-                Visualizer._render_interactive_series(payload, metadata)
+                Visualizer._render_interactive_series(payload, metadata, key_prefix=block_key)
             
             elif block_type == "debug_sql":
                 with st.expander("🔍 Ver Query SQL (Debug)", expanded=False):
                     st.code(payload, language="sql")
 
+            elif block_type == "talent_matrix":
+                Visualizer._render_talent_matrix(payload, key_prefix=block_key)
+
     @staticmethod
     def _create_line_chart(data, metadata):
         fig = go.Figure()
+        
+        # Prepare custom data for tooltips
+        months = data.get('months', [])
+        hc = data.get('headcount', [None] * len(months))
+        ceses = data.get('ceses', [None] * len(months))
+        renuncias = data.get('renuncias', [None] * len(months))
+        
+        # Trace Rotación General: Show HC and Total Salidas
         fig.add_trace(go.Scatter(
-            x=data.get('months', []),
+            x=months,
             y=data.get('rotacion_general', []),
             mode='lines+markers+text',
             name='Rotación General',
-            line=dict(color='#EF3340', width=3), # RIMAC Red
+            line=dict(color='#EF3340', width=3),
             marker=dict(size=8),
             text=[f"{v}%" for v in data.get('rotacion_general', [])],
-            textposition="top center"
+            textposition="top center",
+            customdata=list(zip(hc, ceses)),
+            hovertemplate="<b>%{x}</b><br>Rotación: %{y}%<br>Dotación: %{customdata[0]}<br>Salidas Totales: %{customdata[1]}<extra></extra>"
         ))
+
+        # Trace Rotación Voluntaria: Show only Renuncias (specific to this line)
         fig.add_trace(go.Scatter(
-            x=data.get('months', []),
+            x=months,
             y=data.get('rotacion_voluntaria', []),
             mode='lines+markers+text',
             name='Rotación Voluntaria',
-            line=dict(color='#B0B0B0', width=3, dash='dot'), # Gris secundario
+            line=dict(color='#B0B0B0', width=3, dash='dot'),
             marker=dict(size=8),
             text=[f"{v}%" for v in data.get('rotacion_voluntaria', [])],
-            textposition="top center"
+            textposition="top center",
+            customdata=renuncias,
+            hovertemplate="Voluntaria: %{y}%<br>Salidas Vol.: %{customdata}<extra></extra>"
         ))
+
         fig.update_layout(
             title=f"Evolución Mensual de Rotación {metadata.get('year', '')}",
             xaxis_title="Mes",
@@ -85,28 +105,45 @@ class Visualizer:
 
     @staticmethod
     def _create_bar_chart(data, metadata):
+        months = data.get('months', [])
+        hc = data.get('headcount', [None] * len(months))
+        ceses = data.get('ceses', [None] * len(months))
+        renuncias = data.get('renuncias', [None] * len(months))
+
         df_bar = pd.DataFrame({
-            'Mes': data.get('months', []),
+            'Mes': months,
             'General': data.get('rotacion_general', []),
-            'Voluntaria': data.get('rotacion_voluntaria', [])
+            'Voluntaria': data.get('rotacion_voluntaria', []),
+            'hc': hc,
+            'ceses': ceses,
+            'ren': renuncias
         })
         fig = go.Figure()
+        
+        # Bar General: Show HC and Total Salidas
         fig.add_trace(go.Bar(
             x=df_bar['Mes'],
             y=df_bar['General'],
             name='General',
-            marker_color='#EF3340', # RIMAC Red
+            marker_color='#EF3340',
             text=df_bar['General'].apply(lambda x: f"{x}%"),
-            textposition='auto'
+            textposition='auto',
+            customdata=list(zip(df_bar['hc'], df_bar['ceses'])),
+            hovertemplate="<b>%{x}</b><br>General: %{y}%<br>Dotación: %{customdata[0]}<br>Salidas Totales: %{customdata[1]}<extra></extra>"
         ))
+
+        # Bar Voluntaria: Show only Salidas Vol.
         fig.add_trace(go.Bar(
             x=df_bar['Mes'],
             y=df_bar['Voluntaria'],
             name='Voluntaria',
-            marker_color='#B0B0B0', # Gris neutro
+            marker_color='#B0B0B0',
             text=df_bar['Voluntaria'].apply(lambda x: f"{x}%"),
-            textposition='auto'
+            textposition='auto',
+            customdata=df_bar['ren'],
+            hovertemplate="Voluntaria: %{y}%<br>Salidas Vol.: %{customdata}<extra></extra>"
         ))
+
         fig.update_layout(
             title=f"Comparativa Mensual {metadata.get('year', '')}",
             xaxis_title="Mes",
@@ -142,33 +179,72 @@ class Visualizer:
         return figures
 
     @staticmethod
-    def _render_interactive_series(data: dict, metadata: dict):
+    def _render_interactive_series(data: dict, metadata: dict, key_prefix: str = ""):
         """
         Renders an interactive time-series visualization with tabs for different views.
         """
         if not data:
             return
+            
+        # --- Filtering Logic ---
+        all_months = data.get('months', [])
         
+        # Determine unique key for multiselect to avoid conflicts
+        # Using a deterministic hash based on data content
+        import hashlib
+        data_hash = hashlib.md5(str(data).encode()).hexdigest()[:8]
+        
+        selected_months = st.multiselect(
+            "📅 Filtrar Meses:",
+            options=all_months,
+            default=all_months,
+            key=f"filter_months_{data_hash}_{key_prefix}"
+        )
+        
+        # Apply filter if selection changes
+        filtered_data = data.copy()
+        if selected_months and len(selected_months) != len(all_months):
+            # Get indices of selected months
+            # Assumes 'months' are unique. If not, this logic might need refinement, 
+            # but usually months in timeseries are unique.
+            indices = [i for i, m in enumerate(all_months) if m in selected_months]
+            
+            # Helper to filter list by indices
+            def filter_list(lst):
+                return [lst[i] for i in indices] if lst and len(lst) == len(all_months) else lst
+
+            # Filter all relevant keys
+            filtered_data['months'] = filter_list(data.get('months', []))
+            filtered_data['rotacion_general'] = filter_list(data.get('rotacion_general', []))
+            filtered_data['rotacion_voluntaria'] = filter_list(data.get('rotacion_voluntaria', []))
+            filtered_data['headcount'] = filter_list(data.get('headcount', []))
+            filtered_data['ceses'] = filter_list(data.get('ceses', []))
+            filtered_data['renuncias'] = filter_list(data.get('renuncias', []))
+        
+        if not selected_months:
+             st.warning("⚠️ Selecciona al menos un mes para visualizar.")
+             return
+
         # Create tabs for different visualizations
         tab1, tab2, tab3 = st.tabs(["📈 Gráfico de Línea", "📊 Gráfico de Barras", "📋 Tabla Detallada"])
         
         with tab1:
-            fig = Visualizer._create_line_chart(data, metadata)
-            st.plotly_chart(fig, width='stretch', key=f"line_{str(uuid.uuid4())}")
+            fig = Visualizer._create_line_chart(filtered_data, metadata)
+            st.plotly_chart(fig, width='stretch', key=f"line_{data_hash}_{key_prefix}")
         
         with tab2:
-            fig = Visualizer._create_bar_chart(data, metadata)
-            st.plotly_chart(fig, width='stretch', key=f"bar_{str(uuid.uuid4())}")
+            fig = Visualizer._create_bar_chart(filtered_data, metadata)
+            st.plotly_chart(fig, width='stretch', key=f"bar_{data_hash}_{key_prefix}")
         
         with tab3:
             # Detailed Table
             df_table = pd.DataFrame({
-                'Mes': data.get('months', []),
-                'Rotación General (%)': data.get('rotacion_general', []),
-                'Rotación Voluntaria (%)': data.get('rotacion_voluntaria', []),
-                'Headcount Base': data.get('headcount', []),
-                'Total Ceses': data.get('ceses', []),
-                'Renuncias': data.get('renuncias', [])
+                'Mes': filtered_data.get('months', []),
+                'Rotación General (%)': filtered_data.get('rotacion_general', []),
+                'Rotación Voluntaria (%)': filtered_data.get('rotacion_voluntaria', []),
+                'Headcount Base': filtered_data.get('headcount', []),
+                'Total Ceses': filtered_data.get('ceses', []),
+                'Renuncias': filtered_data.get('renuncias', [])
             })
             
             # Download button
@@ -178,11 +254,11 @@ class Visualizer:
                 data=csv,
                 file_name=f"rotacion_mensual_{metadata.get('year', '')}.csv",
                 mime="text/csv",
-                key=f"dl_series_{str(uuid.uuid4())}"
+                key=f"dl_series_{data_hash}_{key_prefix}"
             )
             
             st.dataframe(df_table, width='stretch', hide_index=True)
-            st.caption(f"Total de {len(df_table)} meses registrados.")
+            st.caption(f"Mostrando {len(df_table)} meses seleccionados.")
 
     @staticmethod
     def _render_kpis(kpis: list):
@@ -219,43 +295,128 @@ class Visualizer:
                 )
 
     @staticmethod
-    def _render_plot(block: dict):
-        subtype = block.get("subtype")
+    def _render_plot(block: dict, key_prefix: str = ""):
+        subtype = block.get("subtype", "bar")
         data = block.get("data", {})
         title = block.get("title", "")
+        # Try to get axis labels from data keys if possible, or metadata
+        x_label = block.get("x_label") or data.get("x_label") or "Categoría"
+        y_label = block.get("y_label") or data.get("y_label") or "Valor"
         
         if title:
             st.subheader(title)
-            
+
+        # Prepare DataFrame for easier manipulation
         try:
-            if subtype == "bar":
-                fig = px.bar(
-                    x=data.get("x"), 
-                    y=data.get("y"),
-                    color=data.get("category") if "category" in data else None
-                )
-            elif subtype == "line":
-                fig = px.line(x=data.get("x"), y=data.get("y"))
-            elif subtype == "pie":
-                fig = px.pie(names=data.get("names"), values=data.get("values"))
-            else:
-                st.warning(f"Tipo de gráfico no soportado: {subtype}")
+            # Deterministic hash for keys
+            import hashlib
+            data_hash = hashlib.md5(str(data).encode()).hexdigest()[:8]
+            
+            df = None
+            if "x" in data and "y" in data:
+                df = pd.DataFrame({"x": data["x"], "y": data["y"]})
+                
+                # --- NUEVOS CAMPOS NOMINALES PARA MAPPING ---
+                if "hc" in data: df["hc"] = data["hc"]
+                if "ceses" in data: df["ceses"] = data["ceses"]
+                
+                # If category exists, add it
+                if "category" in data:
+                    df["category"] = data["category"]
+            elif "names" in data and "values" in data:
+                df = pd.DataFrame({"x": data["names"], "y": data["values"]})
+                # Update labels if specific ones weren't provided
+                if x_label == "Categoría": x_label = "Categoría"
+                if y_label == "Valor": y_label = "Valor"
+
+            if df is None:
+                st.warning("Datos insuficientes para graficar.")
                 return
 
-            st.plotly_chart(fig, width='stretch', key=f"plot_{str(uuid.uuid4())}")
+            # Interactive Chart Switcher
+            chart_type = st.radio(
+                "Tipo de Gráfico:",
+                ["Barras", "Línea", "Pie", "Area"],
+                horizontal=True,
+                key=f"chart_type_{data_hash}_{key_prefix}",
+                index=0 if subtype == "bar" else (1 if subtype == "line" else 2)
+            )
+
+            # Tooltip Configuration
+            hover_data = {}
+            if "hc" in df.columns: hover_data["hc"] = True
+            if "ceses" in df.columns: hover_data["ceses"] = True
             
+            # Labels mapping for tooltips
+            labels_map = {"x": x_label, "y": y_label, "hc": "Dotación", "ceses": "Salidas"}
+
+            fig = None
+            if chart_type == "Barras":
+                fig = px.bar(
+                    df, x="x", y="y",
+                    color="category" if "category" in df.columns else None,
+                    text_auto=True,
+                    labels=labels_map,
+                    hover_data=hover_data
+                )
+            elif chart_type == "Línea":
+                fig = px.line(
+                    df, x="x", y="y",
+                    markers=True,
+                    text="y",
+                    labels=labels_map,
+                    hover_data=hover_data
+                )
+                fig.update_traces(textposition="top center")
+            elif chart_type == "Pie":
+                fig = px.pie(
+                    df, names="x", values="y",
+                    title=f"Distribución - {title}",
+                    hover_data=hover_data,
+                    labels=labels_map
+                )
+                fig.update_traces(textposition='inside', textinfo='percent+label')
+            elif chart_type == "Area":
+                fig = px.area(
+                    df, x="x", y="y",
+                    markers=True,
+                    labels=labels_map,
+                    hover_data=hover_data
+                )
+            
+            # Common Layout Updates
+            if fig:
+                if chart_type != "Pie":
+                    fig.update_layout(
+                        xaxis_title=x_label,
+                        yaxis_title=y_label,
+                        showlegend=True,
+                        legend_title_text="Leyenda"
+                    )
+                
+                # Custom hover template for better formatting
+                if "hc" in df.columns and "ceses" in df.columns:
+                     fig.update_traces(
+                         hovertemplate="<b>%{x}</b><br>" + 
+                                       f"{y_label}: %{{y}}<br>" +
+                                       "Dotación: %{customdata[0]}<br>" +
+                                       "Salidas: %{customdata[1]}<extra></extra>"
+                     )
+
+                st.plotly_chart(fig, width='stretch', key=f"plot_{data_hash}_{key_prefix}")
+
         except Exception as e:
-            st.error(f"Error renderizando gráfico: {e}")
+            st.error(f"Error renderizando gráfico mejorado: {e}")
 
     @staticmethod
-    def _render_table(data: list):
+    def _render_table(data: list, key_prefix: str = ""):
         if data:
             df = pd.DataFrame(data)
             # FIX: Usar un hash determinista del contenido para mantener el estado de los filtros entre reruns.
-            # Si usamos uuid.uuid4(), el key cambia cada vez y se pierden los filtros seleccionados.
+            # COMBINED FIX: Añadir key_prefix para unicidad global (fix StreamlitDuplicateElementKey)
             import hashlib
             data_hash = hashlib.md5(str(data).encode()).hexdigest()[:8]
-            unique_suffix = data_hash
+            unique_suffix = f"{data_hash}_{key_prefix}"
             
             # --- 1. Controles de Interacción (Client-Side) ---
             col1, col2 = st.columns([3, 1])
@@ -281,9 +442,11 @@ class Visualizer:
                 
                 # Detectar columnas categóricas para filtrar
                 # Prioridad: columnas de texto con menos de 50 valores únicos
+                # AJUSTE: Incluir números con baja cardinalidad (ej. mapeo_talento 1-9)
                 potential_filters = [
                     col for col in df.columns 
-                    if df[col].dtype == 'object' and df[col].nunique() < 50
+                    if (df[col].dtype == 'object' or pd.api.types.is_numeric_dtype(df[col])) 
+                    and df[col].nunique() < 50
                 ]
                 
                 # Crear widgets de filtro
@@ -322,3 +485,103 @@ class Visualizer:
                 hide_index=True,
                 column_config=column_config
             )
+
+    @staticmethod
+    def _render_talent_matrix(payload: dict, key_prefix: str = ""):
+        """
+        Renders a 9-Box Talent Matrix (Performance vs Potential).
+        Expects payload: {
+            "title": str,
+            "matrix": [[p3_perf1, p3_perf2, p3_perf3], [p2_perf1, ...], [p1_...]] (Top-down)
+            OR
+            "data": list of dicts [{"performance": 1..3, "potential": 1..3, "count": int}]
+        }
+        """
+        title = payload.get("title", "Matriz de Talento (9-Box)")
+        st.subheader(f"📊 {title}")
+        
+        # Grid definition
+        labels_perf = ["Bajo", "Medio", "Alto"]
+        labels_pot = ["Bajo", "Medio", "Alto"] # Note: Indices 0=Bajo, 1=Medio, 2=Alto
+        
+        # Initialize 3x3 grid (y=potential, x=performance)
+        # We want y-axis (Potential) to go from 1 (Bottom) to 3 (Top)
+        grid = [[0 for _ in range(3)] for _ in range(3)]
+        
+        # Fill grid from payload 'data' if provided
+        data_list = payload.get("data", [])
+        if data_list:
+            for item in data_list:
+                p_x = item.get("performance")
+                p_y = item.get("potential")
+                count = item.get("count", 0)
+                
+                # Manual Mapping to indices 0-2
+                def get_idx(val):
+                    if isinstance(val, int): return val - 1
+                    s = str(val).lower()
+                    if any(x in s for x in ["alto", "high", "3"]): return 2
+                    if any(x in s for x in ["medio", "mid", "2"]): return 1
+                    return 0 # Default to Bajo/Low
+                
+                idx_x = get_idx(p_x)
+                idx_y = get_idx(p_y)
+                
+                if 0 <= idx_x <= 2 and 0 <= idx_y <= 2:
+                    grid[idx_y][idx_x] += count
+        
+        # Matrix direct if present (expected format: [[pot3_p1..p3], [pot2...], [pot1...]])
+        elif "matrix" in payload:
+            raw_matrix = payload["matrix"]
+            # Plotly Heatmap expects Y to go from bottom to top if we want 'Alto' at top.
+            # If the backend sends pot3 as first row, we must reverse for Plotly if we use y=[Bajo, Medio, Alto]
+            grid = raw_matrix[::-1] if len(raw_matrix) == 3 else raw_matrix
+
+        # Annotations (counts)
+        annotations = []
+        for y_idx, row in enumerate(grid):
+            for x_idx, val in enumerate(row):
+                annotations.append(dict(
+                    x=labels_perf[x_idx],
+                    y=labels_pot[y_idx],
+                    text=f"<b>{val}</b>",
+                    showarrow=False,
+                    font=dict(color="white" if val > 0 else "black", size=24)
+                ))
+
+        # Heatmap
+        fig = go.Figure(data=go.Heatmap(
+            z=grid,
+            x=labels_perf,
+            y=labels_pot,
+            colorscale=[
+                [0, "#F8F9FA"],    # Light Grey (Empty)
+                [0.1, "#FFEBEE"],  # Very light red
+                [0.5, "#EF9A9A"],  # Mid red
+                [1.0, "#EF3340"]   # RIMAC RED (Full)
+            ],
+            showscale=False,
+            hovertemplate="Desempeño: %{x}<br>Potencial: %{y}<br>Colaboradores: %{z}<extra></extra>"
+        ))
+        
+        fig.update_layout(
+            annotations=annotations,
+            xaxis_title="Desempeño (Performance)",
+            yaxis_title="Potencial (Potential)",
+            height=500,
+            width=500,
+            margin=dict(l=40, r=20, t=40, b=40),
+            xaxis=dict(tickfont=dict(size=14)),
+            yaxis=dict(tickfont=dict(size=14), scaleanchor="x", scaleratio=1),
+            template="plotly_white"
+        )
+        
+        st.plotly_chart(fig, use_container_width=True, key=f"9box_{key_prefix}")
+        
+        with st.expander("📚 ¿Cómo leer el Mapeo de Talento?"):
+            st.markdown("""
+            La matriz **9-Box** cruza el desempeño actual con el potencial futuro:
+            - **Caja 9 (Alto/Alto):** "Estrellas". Candidatos ideales para sucesión inmediata.
+            - **Caja 7/8:** "Talento Emergente". Alto potencial con desempeño sólido.
+            - **Caja 1 (Bajo/Bajo):** "Bajo desempeño". Requiere plan de acción o revisión de rol.
+            """)

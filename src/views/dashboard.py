@@ -40,14 +40,14 @@ def render_dashboard():
     # Mostrar mensajes anteriores
     from src.components.visualizer import Visualizer
     
-    for msg in st.session_state.messages:
+    for idx, msg in enumerate(st.session_state.messages):
         with st.chat_message(msg["role"]):
             # Soporte híbrido: Texto plano (Legacy) o Estructura Visual
             content = msg["content"]
             if isinstance(content, str):
                 st.markdown(content)
             elif isinstance(content, list):
-                Visualizer.render(content)
+                Visualizer.render(content, key_prefix=str(idx))
 
     # --- INPUT DEL USUARIO ---
     # Placeholder genérico
@@ -117,8 +117,9 @@ def render_dashboard():
             # --- RENDERIZADO ---
             if is_visual:
                 st.session_state.messages.append({"role": "assistant", "content": content_payload})
+                new_msg_idx = len(st.session_state.messages) - 1
                 with st.chat_message("assistant"):
-                    Visualizer.render(content_payload)
+                    Visualizer.render(content_payload, key_prefix=str(new_msg_idx))
             else:
                 # Fallback: Texto plano
                 # Prioridad: 'response' > 'content' (si fuera string) > Error
