@@ -103,14 +103,22 @@ def render_dashboard():
             
             # Caso C: JSON String dentro de "response" (El LLM devolvió JSON como texto)
             elif "response" in response_data:
-                text_response = response_data["response"]
-                # Intentamos "olfatear" si es un JSON de VisualPackage
-                if isinstance(text_response, str) and text_response.strip().startswith("{") and '"content":' in text_response:
+                text_response = str(response_data["response"])
+                # Intentamos "olfatear" si hay un JSON en el texto
+                matches = re.search(r"(\{.*?\})", text_response, re.DOTALL)
+                if matches:
                     try:
-                        parsed = json.loads(text_response)
-                        if "content" in parsed and isinstance(parsed["content"], list):
+                        parsed = json.loads(matches.group(1))
+                        # Si tiene content, lo usamos
+                        if isinstance(parsed, dict) and "content" in parsed:
                             is_visual = True
                             content_payload = parsed["content"]
+                        # Si tiene visual_package (el caso del error), lo extraemos
+                        elif isinstance(parsed, dict) and "visual_package" in parsed:
+                            vp = parsed["visual_package"]
+                            is_visual = True
+                            if isinstance(vp, list): content_payload = vp
+                            elif isinstance(vp, dict): content_payload = [{"type": "text", "payload": vp.get("text", str(vp))}]
                     except json.JSONDecodeError:
                         pass # No era JSON válido, tratamos como texto normal
             
@@ -133,3 +141,31 @@ def render_dashboard():
                 with st.chat_message("assistant"):
                     st.markdown(ai_text)
             
+    # --- DEBUGGER UI (Solo si está activo) ---
+    if st.session_state.get("show_debugger", False):
+        st.divider()
+        with st.expander("🛠️ Debugger: Comunicación con Backend", expanded=True):
+            if "last_api_response" in st.session_state:
+                res = st.session_state.last_api_response
+                
+                # Extraer Telemetría
+                telemetry = res.get("telemetry", {})
+                if telemetry:
+                    c1, c2, c3 = st.columns(3)
+                    with c1:
+                        st.metric("Model Turns", telemetry.get("model_turns", 0))
+                    with c2:
+                        st.metric("Tools Llamadas", len(telemetry.get("tools_executed", [])))
+                    with c3:
+                        st.metric("Req. Totales (est)", telemetry.get("api_invocations_est", 0))
+                    
+                    if telemetry.get("tools_executed"):
+                        st.write(f"🔧 **Herramientas usadas:** `{', '.join(telemetry['tools_executed'])}`")
+                else:
+                    st.info("No hay telemetría en esta respuesta (Legacy o Error).")
+                
+                # Raw JSON
+                st.write("📄 **Raw JSON Response:**")
+                st.json(res)
+            else:
+                st.info("Esperando la primera consulta para mostrar datos de debug.")

@@ -57,7 +57,9 @@ class ApiClient:
             response.raise_for_status() 
             
             # Retornamos la respuesta en JSON
-            return response.json()
+            res_json = response.json()
+            st.session_state.last_api_response = res_json
+            return res_json
             
         except requests.exceptions.ConnectionError:
             st.error("❌ Error de Conexión: No se encuentra el Backend.")
