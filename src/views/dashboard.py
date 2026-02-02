@@ -1,5 +1,7 @@
 # src/views/dashboard.py
+# Includes CSS hacks for button alignment
 import streamlit as st
+import os
 from src.state import get_user, logout
 from src.security.auth import AuthService
 from src.services.api_client import ApiClient
@@ -11,31 +13,146 @@ def render_dashboard():
     
     # --- Sidebar ---
     with st.sidebar:
-        # Cambio de nombre: De "Rotación Agent" a la marca genérica
-        st.markdown("## 🛡️ RIMAC Seguros") 
-        st.caption("People Analytics & AI") 
-        
-        st.info(f"Usuario: **{user.name}**")
-        st.caption(f"Rol: {user.role.upper()}")
-        
-        if st.button("Cerrar Sesión"):
-            logout()
+        # BRANDING: Logo profesional
+        if os.path.exists("src/images/logo.svg"):
+            st.image("src/images/logo.svg", width=140)
+        elif os.path.exists("src/images/rimac.png"):
+             st.image("src/images/rimac.png", width=120)
+        else:
+            st.markdown("## 🛡️ RIMAC Seguros")
             
+        st.caption("People Analytics & AI") 
+        st.divider()
+        
+        # PERFIL DE USUARIO: Diseño limpio
+        col_avatar, col_info = st.columns([1, 4])
+        with col_avatar:
+             st.markdown("## 👤")
+        with col_info:
+             st.markdown(f"**{user.name}**")
+             # Badge simulado con markdown
+             st.markdown(f"<span style='background-color:#F5F5F5; padding: 2px 8px; border-radius: 4px; font-size: 12px; color: #666;'>{user.role.upper()}</span>", unsafe_allow_html=True)
+
+        st.markdown("<br>", unsafe_allow_html=True) # Espaciador
+        
+        if st.button("🔒 Cerrar Sesión", use_container_width=True, type="secondary"):
+            logout()
+            st.rerun()
+
+        # ESPACIO FINAL Y CONFIG
+        st.divider()
+        with st.expander("⚙️ Configuración", expanded=False):
+             show_debug = st.toggle("Modo Debug", value=st.session_state.get("show_debug", False))
+             st.session_state["show_debug"] = show_debug
+
     # --- UI Principal ---
     # Títulos neutrales para producción
-    st.title("🔴 Asistente de Gestión del Talento")
-    st.markdown(f"Bienvenido/a **{user.name}**. Aquí tienes tu centro de comando para People Analytics.")
     
+    # Header de Bienvenida con Estilo
+    st.markdown(f"""
+        <h1 style='color: #1A202C; font-size: 2.2rem;'>¡Hola, {user.name.split(' ')[0]}! 👋</h1>
+        <p style='color: #718096; font-size: 1.1rem;'>
+            Bienvenido a tu <b>Centro de Comando de Talento</b>. ¿Qué insights descubriremos hoy?
+        </p>
+        <br>
+    """, unsafe_allow_html=True)
 
+    # Tarjetas de Acción Rápida (Solo si NO hay historial de chat para no saturar)
+    if not st.session_state.get("messages"):
+        c1, c2, c3 = st.columns(3)
+        
+        with c1:
+            with st.container(border=True):
+                st.markdown("### 📉 Rotación y Fugas")
+                st.caption("Analiza tendencias de salida y retención.")
+                if st.button("Ver Análisis de Rotación ➔", key="btn_rotacion"):
+                     # Prompt Específico: Periodo, Comparativa y Dimensión (Divisiones = UO2)
+                     st.session_state.messages.append({"role": "user", "content": "Analiza la rotación voluntaria del año 2024 y 2025 comparada por divisiones."})
+                     st.rerun()
+
+        with c2:
+            with st.container(border=True):
+                st.markdown("### ⭐ Talento Clave")
+                st.caption("Identifica a tus HiPos y Riesgos.")
+                if st.button("Ver Top Talent ➔", key="btn_talento"):
+                     st.session_state.messages.append({"role": "user", "content": "Muestra las fugas de talento clave (Hiper/Hipo) registradas en el último mes cerrado."})
+                     st.rerun()
+
+        with c3:
+            with st.container(border=True):
+                st.markdown("### 🚨 Alertas Activas")
+                st.caption("Focos rojos que requieren atención.")
+                if st.button("Ver Alertas ➔", key="btn_alertas"):
+                     st.session_state.messages.append({"role": "user", "content": "¿Qué divisiones (UO2) tienen la mayor tasa de renuncia acumulada en el año 2025?"})
+                     st.rerun()
+        
+        # --- SUGGESTIONS / BRAINSTORMING BLOCK ---
+        st.divider()
+        st.markdown("##### 💡 ¿No sabes por dónde empezar? Prueba estas consultas:")
+        
+        # CSS HACK: Alinear texto de botones a la izquierda para parecer lista
+        # CSS HACK: Alinear texto de botones a la izquierda para parecer lista
+        st.markdown("""
+            <style>
+            /* Force left alignment for buttons in columns (Suggestions) */
+            div[data-testid="stColumn"] button {
+                justify-content: flex-start !important;
+                text-align: left !important;
+                border: 1px solid #cbd5e0 !important;
+                border-radius: 8px !important;
+                background-color: white !important;
+                box-shadow: 0 1px 3px rgba(0,0,0,0.1) !important;
+                width: 100% !important;
+            }
+            div[data-testid="stColumn"] button p {
+                text-align: left !important;
+                width: 100%;
+            }
+            div[data-testid="stColumn"] button:hover {
+                border-color: #a0aec0 !important;
+                background-color: #f7fafc !important;
+                box-shadow: 0 2px 5px rgba(0,0,0,0.1) !important;
+            }
+            </style>
+        """, unsafe_allow_html=True)
+
+        # Grid de sugerencias
+        s_col1, s_col2, s_col3 = st.columns(3)
+        
+        with s_col1:
+            st.markdown("**📊 Tendencias y Evolución**")
+            # Usar espacios NO rompibles para separar el bullet
+            if st.button("•  Curva de rotación mensual 2025", use_container_width=True):
+                st.session_state.messages.append({"role": "user", "content": "Muestra la tendencia mensual de rotación voluntaria e involuntaria del 2025 a nivel de toda la empresa."})
+                st.rerun()
+            if st.button("•  Comparativo 2024 vs 2025", use_container_width=True):
+                st.session_state.messages.append({"role": "user", "content": "Genera un gráfico comparativo de la rotación acumulada entre el año 2024 y 2025."})
+                st.rerun()
+
+        with s_col2:
+            st.markdown("**🔍 Focos y Segmentos**")
+            if st.button("•  Ranking de Divisiones (UO2)", use_container_width=True):
+                 st.session_state.messages.append({"role": "user", "content": "¿Cuáles son las 5 divisiones (UO2) con mayor cantidad de renuncias en lo que va del año?"})
+                 st.rerun()
+            if st.button("•  FFVV vs Administrativos", use_container_width=True):
+                 st.session_state.messages.append({"role": "user", "content": "Compara la tasa de rotación entre el segmento Fuerza de Ventas y Administrativos para el año 2025."})
+                 st.rerun()
+
+        with s_col3:
+            st.markdown("**🧠 Insights Profundos**")
+            if st.button("•  Motivos de Salida", use_container_width=True):
+                 st.session_state.messages.append({"role": "user", "content": "¿Cuáles son los principales motivos de renuncia registrados en el último trimestre de 2025 a nivel de toda la empresa?"})
+                 st.rerun()
+            if st.button("•  Listado de Bajas Recientes", use_container_width=True):
+                 st.session_state.messages.append({"role": "user", "content": "Dame un listado detallado de las personas que cesaron el último mes cerrado del año 2025 a nivel de toda la empresa."})
+                 st.rerun()
+    
 
     # --- HISTORIAL DE CHAT ---
     if "messages" not in st.session_state:
         st.session_state.messages = []
-        # Agregar saludo inicial SOLO si el historial está vacío al inicio de sesión
-        st.session_state.messages.append({
-            "role": "assistant", 
-            "content": f"Hola **{user.name}**. Estoy listo para ayudarte con tus tareas de People Analytics."
-        })
+        # El historial inicia vacío para mostrar las Tarjetas de Acción
+
 
     # Mostrar mensajes anteriores
     from src.components.visualizer import Visualizer
@@ -51,17 +168,34 @@ def render_dashboard():
 
     # --- INPUT DEL USUARIO ---
     # Placeholder genérico
+    # --- INPUT DEL USUARIO ---
+    # Placeholder genérico
     if prompt := st.chat_input("Escribe tu consulta aquí..."):
-        
-        # 1. Mostrar mensaje usuario
+        # 0. Limpiar estado de Debugger anterior para evitar "Ghosts"
+        if "last_api_response" in st.session_state:
+            st.session_state.last_api_response = {}
+        # 1. Agregar mensaje del usuario al historial
         st.session_state.messages.append({"role": "user", "content": prompt})
+        # Renderizar INMEDIATAMENTE para feedback visual (Solo en input manual)
         with st.chat_message("user"):
             st.markdown(prompt)
+        
+    # --- LÓGICA DE RESPUESTA CENTRALIZADA ---
+    # Si el último mensaje es del usuario (venga del Input o de los Botones), generamos respuesta
+    if st.session_state.messages and st.session_state.messages[-1]["role"] == "user":
+        
+        # Recuperar el último prompt
+        prompt_content = st.session_state.messages[-1]["content"]
+
+        # NOTA: No renderizamos el mensaje del usuario AQUÍ.
+        # - Si vino de chat_input, ya se renderizó arriba.
+        # - Si vino de botón + rerun, ya se renderizó en el bucle de historial al principio.
+        # Esto soluciona el bug de duplicidad.
 
         # 2. LLAMADA AL BACKEND REAL
-        with st.spinner("Procesando..."):
+        with st.spinner("Procesando consulta..."):
             # El backend recibirá el rol del usuario y decidirá qué tools usar internamente
-            response_data = api_client.send_chat(prompt, user)
+            response_data = api_client.send_chat(prompt_content, user)
 
         # 3. Mostrar respuesta AI
         if response_data:
@@ -81,12 +215,11 @@ def render_dashboard():
                     </div>
                     """, unsafe_allow_html=True)
 
-
             
             st.divider()
 
             import json
-            # ... (Resto de la lógica de visualizer)
+            import re
             # Lógica de detección robusta de VisualDataPackage
             is_visual = False
             content_payload = []
@@ -125,9 +258,9 @@ def render_dashboard():
             # --- RENDERIZADO ---
             if is_visual:
                 st.session_state.messages.append({"role": "assistant", "content": content_payload})
-                new_msg_idx = len(st.session_state.messages) - 1
-                with st.chat_message("assistant"):
-                    Visualizer.render(content_payload, key_prefix=str(new_msg_idx))
+                # No necesitamos renderizar aquí el componente visual complejo, 
+                # porque st.rerun() lo hará en el bucle principal de historial.
+                # Solo mostrar feedback inmediato si se desea, pero rerun es más limpio.
             else:
                 # Fallback: Texto plano
                 # Prioridad: 'response' > 'content' (si fuera string) > Error
@@ -138,11 +271,19 @@ def render_dashboard():
                     ai_text = ai_text.replace("```json", "").replace("```", "").strip()
                 
                 st.session_state.messages.append({"role": "assistant", "content": ai_text})
-                with st.chat_message("assistant"):
-                    st.markdown(ai_text)
+
+            # Forzar actualización para que el mensaje nuevo aparezca en el historial principal
+            st.rerun()
+            
+            # --- VIEW JSON PAYLOAD (Added for Debug in Local Mode) ---
+            from src.config import SHOW_DEBUG_UI
+            if SHOW_DEBUG_UI:
+                with st.expander("📄 Ver JSON Payload (Debug)"):
+                     st.json(content_payload if is_visual else ai_text)
             
     # --- DEBUGGER UI (Solo si está activo) ---
-    if st.session_state.get("show_debugger", False):
+    from src.config import SHOW_DEBUG_UI
+    if SHOW_DEBUG_UI and st.session_state.get("show_debugger", False):
         st.divider()
         with st.expander("🛠️ Debugger: Comunicación con Backend", expanded=True):
             if "last_api_response" in st.session_state:

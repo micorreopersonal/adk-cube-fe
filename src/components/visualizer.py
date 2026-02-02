@@ -49,8 +49,10 @@ class Visualizer:
                 Visualizer._render_interactive_series(payload, metadata, key_prefix=block_key)
             
             elif block_type == "debug_sql":
-                with st.expander("🔍 Ver Query SQL (Debug)", expanded=False):
-                    st.code(payload, language="sql")
+                from src.config import SHOW_DEBUG_UI
+                if SHOW_DEBUG_UI:
+                    with st.expander("🔍 Ver Query SQL (Debug)", expanded=False):
+                        st.code(payload, language="sql")
 
             elif block_type == "talent_matrix":
                 Visualizer._render_talent_matrix(payload, key_prefix=block_key)
@@ -61,45 +63,135 @@ class Visualizer:
         
         # Prepare custom data for tooltips
         months = data.get('months', [])
-        hc = data.get('headcount', [None] * len(months))
-        ceses = data.get('ceses', [None] * len(months))
-        renuncias = data.get('renuncias', [None] * len(months))
         
-        # Trace Rotación General: Show HC and Total Salidas
-        fig.add_trace(go.Scatter(
-            x=months,
-            y=data.get('rotacion_general', []),
-            mode='lines+markers+text',
-            name='Rotación General',
-            line=dict(color='#EF3340', width=3),
-            marker=dict(size=8),
-            text=[f"{v}%" for v in data.get('rotacion_general', [])],
-            textposition="top center",
-            customdata=list(zip(hc, ceses)),
-            hovertemplate="<b>%{x}</b><br>Rotación: %{y}%<br>Dotación: %{customdata[0]}<br>Salidas Totales: %{customdata[1]}<extra></extra>"
-        ))
+        # Determine specific colors
+        COLOR_PRIMARY = '#EF3340' # Red
+        COLOR_SECONDARY = '#3949AB' # Indigo
+        COLOR_TERTIARY = '#757575' # Grey
+        
+        # Check if it is a comparison
+        is_comparison = metadata.get("type") == "comparison"
+        
+        if is_comparison:
+            # --- LOGIC FOR COMPARISON (Multi-Line) ---
+            years = []
+            if "primary_year" in metadata: years.append(str(metadata["primary_year"]))
+            if "secondary_year" in metadata: years.append(str(metadata["secondary_year"]))
+            
+            # Map colors
+            color_map = {
+                0: COLOR_PRIMARY,    # Primary Year
+                1: COLOR_SECONDARY,  # Secondary Year
+                2: COLOR_TERTIARY
+            }
 
-        # Trace Rotación Voluntaria: Show only Renuncias (specific to this line)
-        fig.add_trace(go.Scatter(
-            x=months,
-            y=data.get('rotacion_voluntaria', []),
-            mode='lines+markers+text',
-            name='Rotación Voluntaria',
-            line=dict(color='#B0B0B0', width=3, dash='dot'),
-            marker=dict(size=8),
-            text=[f"{v}%" for v in data.get('rotacion_voluntaria', [])],
-            textposition="top center",
-            customdata=renuncias,
-            hovertemplate="Voluntaria: %{y}%<br>Salidas Vol.: %{customdata}<extra></extra>"
-        ))
+            for idx, year_key in enumerate(years):
+                year_color = color_map.get(idx, COLOR_TERTIARY)
+                
+                # General Turnover Line
+                if year_key in data:
+                    series_data = data[year_key]
+                    # Voluntary Key
+                    vol_key = f"{year_key} Voluntaria"
+                    vol_data = data.get(vol_key, [0]*len(series_data))
+                    
+                    fig.add_trace(go.Scatter(
+                        x=months,
+                        y=series_data,
+                        mode='lines+markers+text',
+                        name=f'Rotación {year_key}',
+                        line=dict(color=year_color, width=3),
+                        marker=dict(size=8),
+                        text=[f"{v:.2f}%" for v in series_data],
+                        textposition="top center",
+                        hovertemplate=f"<b>{year_key}</b><br>Mes: %{{x}}<br>Rotación: %{{y}}%<extra></extra>"
+                    ))
+                    
+                    # Voluntary Line (Dashed)
+                    fig.add_trace(go.Scatter(
+                        x=months,
+                        y=vol_data,
+                        mode='lines+markers+text', # Text enabled
+                        name=f'Voluntaria {year_key}',
+                        line=dict(color=year_color, width=2, dash='dot'),
+                        marker=dict(size=6, symbol='circle-open'),
+                        text=[f"{v:.2f}%" for v in vol_data],
+                        textposition="bottom center",
+                        hovertemplate=f"<b>{year_key} (Vol)</b><br>Mes: %{{x}}<br>Rotación: %{{y}}%<extra></extra>"
+                    ))
+
+                    # Involuntary Line (Dotted - Diamond)
+                    inv_key = f"{year_key} Involuntaria"
+                    inv_data = data.get(inv_key, [0]*len(series_data))
+                    
+                    fig.add_trace(go.Scatter(
+                        x=months,
+                        y=inv_data,
+                        mode='lines+markers+text', 
+                        name=f'Involuntaria {year_key}',
+                        line=dict(color=year_color, width=2, dash='dot'),
+                        marker=dict(size=6, symbol='diamond-open'),
+                        text=[f"{v:.2f}%" for v in inv_data],
+                        textposition="bottom center",
+                        hovertemplate=f"<b>{year_key} (Inv)</b><br>Mes: %{{x}}<br>Rotación: %{{y}}%<extra></extra>"
+                    ))
+
+        else:
+            # --- LEGACY LOGIC (Single Year) ---
+            hc = data.get('headcount', [None] * len(months))
+            ceses = data.get('ceses', [None] * len(months))
+            renuncias = data.get('renuncias', [None] * len(months))
+            
+            # Trace Rotación General
+            fig.add_trace(go.Scatter(
+                x=months,
+                y=data.get('rotacion_general', []),
+                mode='lines+markers+text',
+                name='Rotación General',
+                line=dict(color=COLOR_PRIMARY, width=3),
+                marker=dict(size=8),
+                text=[f"{v}%" for v in data.get('rotacion_general', [])],
+                textposition="top center",
+                customdata=list(zip(hc, ceses)),
+                hovertemplate="<b>%{x}</b><br>Rotación: %{y}%<br>Dotación: %{customdata[0]}<br>Salidas Totales: %{customdata[1]}<extra></extra>"
+            ))
+
+            # Trace Rotación Involuntaria
+            fig.add_trace(go.Scatter(
+                x=months,
+                y=data.get('rotacion_involuntaria', []),
+                mode='lines+markers+text',
+                name='Rotación Involuntaria',
+                line=dict(color='#1E88E5', width=3, dash='dot'),
+                marker=dict(size=8, symbol='diamond'),
+                text=[f"{v}%" for v in data.get('rotacion_involuntaria', [])],
+                textposition="bottom center",
+                customdata=data.get('involuntarios', [0]*len(months)),
+                hovertemplate="Involuntaria: %{y}%<br>Salidas Inv.: %{customdata}<extra></extra>"
+            ))
+
+            # Trace Rotación Voluntaria
+            fig.add_trace(go.Scatter(
+                x=months,
+                y=data.get('rotacion_voluntaria', []),
+                mode='lines+markers+text',
+                name='Rotación Voluntaria',
+                line=dict(color='#B0B0B0', width=3, dash='dot'),
+                marker=dict(size=8),
+                text=[f"{v}%" for v in data.get('rotacion_voluntaria', [])],
+                textposition="top center",
+                customdata=renuncias,
+                hovertemplate="Voluntaria: %{y}%<br>Salidas Vol.: %{customdata}<extra></extra>"
+            ))
 
         fig.update_layout(
-            title=f"Evolución Mensual de Rotación {metadata.get('year', '')}",
+            title=f"Dinámica Mensual de Rotación {metadata.get('year', '')}",
             xaxis_title="Mes",
             yaxis_title="Tasa de Rotación (%)",
             hovermode='x unified',
             template='plotly_white',
-            height=500
+            height=500,
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
         )
         return fig
 
@@ -109,11 +201,13 @@ class Visualizer:
         hc = data.get('headcount', [None] * len(months))
         ceses = data.get('ceses', [None] * len(months))
         renuncias = data.get('renuncias', [None] * len(months))
+        involuntarios = data.get('involuntarios', [None] * len(months))
 
         df_bar = pd.DataFrame({
             'Mes': months,
             'General': data.get('rotacion_general', []),
             'Voluntaria': data.get('rotacion_voluntaria', []),
+            'Involuntaria': data.get('rotacion_involuntaria', []),
             'hc': hc,
             'ceses': ceses,
             'ren': renuncias
@@ -142,6 +236,18 @@ class Visualizer:
             textposition='auto',
             customdata=df_bar['ren'],
             hovertemplate="Voluntaria: %{y}%<br>Salidas Vol.: %{customdata}<extra></extra>"
+        ))
+
+        # Bar Involuntaria
+        fig.add_trace(go.Bar(
+            x=df_bar['Mes'],
+            y=df_bar['Involuntaria'],
+            name='Involuntaria',
+            marker_color='#1E88E5',
+            text=df_bar['Involuntaria'].apply(lambda x: f"{x}%"),
+            textposition='auto',
+            customdata=df_bar['involuntarios'] if 'involuntarios' in df_bar else [0]*len(months),
+            hovertemplate="Involuntaria: %{y}%<br>Salidas Inv.: %{customdata}<extra></extra>"
         ))
 
         fig.update_layout(
@@ -189,6 +295,25 @@ class Visualizer:
         # --- Filtering Logic ---
         all_months = data.get('months', [])
         
+        # FIX: Normalizar longitudes de los arrays para evitar errores en pandas
+        # Asegura que todos los arrays tengan el mismo largo que 'months' antes de filtrar
+        target_len = len(all_months)
+        keys_to_sync = ['rotacion_general', 'rotacion_voluntaria', 'rotacion_involuntaria', 'headcount', 'ceses', 'renuncias', 'involuntarios']
+        
+        for k in keys_to_sync:
+            current_list = data.get(k, [])
+            if current_list is None: 
+                current_list = []
+            current_list = list(current_list) # Force list type
+            
+            if len(current_list) < target_len:
+                # Pad with None per consistency
+                current_list.extend([None] * (target_len - len(current_list)))
+                data[k] = current_list
+            elif len(current_list) > target_len:
+                # Truncate
+                data[k] = current_list[:target_len]
+        
         # Determine unique key for multiselect to avoid conflicts
         # Using a deterministic hash based on data content
         import hashlib
@@ -217,9 +342,11 @@ class Visualizer:
             filtered_data['months'] = filter_list(data.get('months', []))
             filtered_data['rotacion_general'] = filter_list(data.get('rotacion_general', []))
             filtered_data['rotacion_voluntaria'] = filter_list(data.get('rotacion_voluntaria', []))
+            filtered_data['rotacion_involuntaria'] = filter_list(data.get('rotacion_involuntaria', []))
             filtered_data['headcount'] = filter_list(data.get('headcount', []))
             filtered_data['ceses'] = filter_list(data.get('ceses', []))
             filtered_data['renuncias'] = filter_list(data.get('renuncias', []))
+            filtered_data['involuntarios'] = filter_list(data.get('involuntarios', []))
         
         if not selected_months:
              st.warning("⚠️ Selecciona al menos un mes para visualizar.")
@@ -242,9 +369,11 @@ class Visualizer:
                 'Mes': filtered_data.get('months', []),
                 'Rotación General (%)': filtered_data.get('rotacion_general', []),
                 'Rotación Voluntaria (%)': filtered_data.get('rotacion_voluntaria', []),
+                'Rotación Involuntaria (%)': filtered_data.get('rotacion_involuntaria', []),
                 'Headcount Base': filtered_data.get('headcount', []),
                 'Total Ceses': filtered_data.get('ceses', []),
-                'Renuncias': filtered_data.get('renuncias', [])
+                'Renuncias': filtered_data.get('renuncias', []),
+                'Involuntarias': filtered_data.get('involuntarios', [])
             })
             
             # Download button
@@ -291,7 +420,8 @@ class Visualizer:
                     label=kpi.get("label"),
                     value=kpi.get("value"),
                     delta=kpi.get("delta"),
-                    delta_color=final_color
+                    delta_color=final_color,
+                    help=kpi.get("tooltip_data")
                 )
 
     @staticmethod
@@ -402,6 +532,12 @@ class Visualizer:
                                        "Dotación: %{customdata[0]}<br>" +
                                        "Salidas: %{customdata[1]}<extra></extra>"
                      )
+                else:
+                    # Generic nice tooltip for other charts (e.g. Distribution)
+                    fig.update_traces(
+                        hovertemplate="<b>%{x}</b><br>" +
+                                      f"{y_label}: %{{y}}<br><extra></extra>"
+                    )
 
                 st.plotly_chart(fig, width='stretch', key=f"plot_{data_hash}_{key_prefix}")
 

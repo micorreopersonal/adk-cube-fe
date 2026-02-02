@@ -1,5 +1,5 @@
 # deploy.ps1 - ADK Frontend Deployment Script
-$PROJECT_ID = "adk-team-fitness" # Id corregido según el error anterior
+$PROJECT_ID = "adk-sandbox-486117" # Proyecto: adk-sandbox
 $REGION = "us-central1"
 $SERVICE_NAME = "adk-people-analytics-frontend"
 $IMAGE_NAME = "gcr.io/$PROJECT_ID/$SERVICE_NAME"

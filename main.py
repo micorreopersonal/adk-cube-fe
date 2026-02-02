@@ -5,7 +5,11 @@ from src.views.login import render_login
 from src.views.dashboard import render_dashboard
 
 # Configuración de página DEBE ser la primera instrucción de Streamlit
-st.set_page_config(page_title="ADK Frontend", layout="wide")
+st.set_page_config(
+    page_title="People Analytics Agent",
+    page_icon="src/images/logo.svg",
+    layout="wide"
+)
 
 from src.styles import apply_custom_css
 
