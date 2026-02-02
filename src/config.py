@@ -11,19 +11,17 @@ DEV_URL = "http://127.0.0.1:8080"
 # URL de Producción actualizada (adk-sandbox)
 PROD_URL = "https://adk-people-analytics-backend-828393973311.us-central1.run.app"
 
-# Usar BACKEND_URL de .env o entorno
-# Si estamos en Cloud Run (PYTHON_ENV=production), forzamos PROD_URL si no viene por env.
-IS_PROD = os.getenv("PYTHON_ENV", "development") == "production"
+# APP_MODE: 'development' o 'production'
+# Este es el "Master Switch" que pidió el usuario.
+APP_MODE = os.getenv("APP_MODE", os.getenv("PYTHON_ENV", "development")).lower()
+IS_PROD = APP_MODE == "production"
 
 if IS_PROD:
     BACKEND_URL = os.getenv("BACKEND_URL", PROD_URL)
+    print(f"🌐 MODO NUBE ACTIVO (Backend: {BACKEND_URL})")
 else:
     BACKEND_URL = os.getenv("BACKEND_URL", DEV_URL)
+    print(f"🛠️ MODO LOCAL ACTIVO (Backend: {BACKEND_URL})")
 
-if IS_PROD:
-    print(f"🌐 Iniciando modo PRODUCCIÓN (Backend: {BACKEND_URL})")
-else:
-    print(f"🛠️ Modo: DESARROLLO (Backend: {BACKEND_URL})")
-
-# Constante global para controlar visibilidad de debug
+# Constante global para controlar visibilidad de debug (Inversa a IS_PROD)
 SHOW_DEBUG_UI = not IS_PROD

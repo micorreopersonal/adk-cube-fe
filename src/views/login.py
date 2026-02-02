@@ -49,6 +49,7 @@ def render_login():
         # --- FOOTER / DEV HELP ---
         st.markdown("<div style='text-align: center; color: #CBD5E0; font-size: 0.8rem; margin-top: 2rem;'>© 2026 Rimac Seguros y Reaseguros</div>", unsafe_allow_html=True)
 
-        if os.getenv("SHOW_LOGIN_HINTS", "True") == "True":
+        from src.config import SHOW_DEBUG_UI
+        if SHOW_DEBUG_UI:
             with st.expander("🛠️ Credenciales de Prueba"):
                 st.code("User: admin / Pass: p014654\nUser: Paul / Pass: admin123")

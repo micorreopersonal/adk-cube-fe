@@ -13,37 +13,60 @@ def render_dashboard():
     
     # --- Sidebar ---
     with st.sidebar:
-        # BRANDING: Logo profesional
+        # BRANDING: Centrado
+        st.markdown("<div style='text-align: center;'>", unsafe_allow_html=True)
         if os.path.exists("src/images/logo.svg"):
-            st.image("src/images/logo.svg", width=140)
+            st.image("src/images/logo.svg", width=160)
         elif os.path.exists("src/images/rimac.png"):
-             st.image("src/images/rimac.png", width=120)
+             st.image("src/images/rimac.png", width=140)
         else:
             st.markdown("## 🛡️ RIMAC Seguros")
             
-        st.caption("People Analytics & AI") 
+        st.markdown("<p style='color: #718096; font-size: 0.9rem; margin-top: -10px;'>People Analytics & AI</p>", unsafe_allow_html=True)
+        st.markdown("</div>", unsafe_allow_html=True)
+        
         st.divider()
         
-        # PERFIL DE USUARIO: Diseño limpio
-        col_avatar, col_info = st.columns([1, 4])
-        with col_avatar:
-             st.markdown("## 👤")
-        with col_info:
-             st.markdown(f"**{user.name}**")
-             # Badge simulado con markdown
-             st.markdown(f"<span style='background-color:#F5F5F5; padding: 2px 8px; border-radius: 4px; font-size: 12px; color: #666;'>{user.role.upper()}</span>", unsafe_allow_html=True)
+        # PERFIL DE USUARIO: Diseño en Card Centrado
+        with st.container(border=True):
+            # Usar columnas para centrar el contenido del perfil
+            c_space1, c_content, c_space2 = st.columns([1, 8, 1])
+            with c_content:
+                st.markdown("<div style='text-align: center;'>", unsafe_allow_html=True)
+                st.markdown("### 👤")
+                st.markdown(f"**{user.name}**")
+                st.markdown(f"<span style='background-color:#F5F5F5; padding: 2px 8px; border-radius: 4px; font-size: 12px; color: #666;'>{user.role.upper()}</span>", unsafe_allow_html=True)
+                st.markdown("</div>", unsafe_allow_html=True)
 
         st.markdown("<br>", unsafe_allow_html=True) # Espaciador
         
+        # Estilo para el botón de Cerrar Sesión (con borde)
+        st.markdown("""
+            <style>
+            section[data-testid="stSidebar"] div.stButton > button {
+                border: 1px solid #d1d5db !important;
+                border-radius: 8px !important;
+                transition: all 0.3s ease;
+            }
+            section[data-testid="stSidebar"] div.stButton > button:hover {
+                border-color: #ef4444 !important;
+                color: #ef4444 !important;
+                background-color: #fef2f2 !important;
+            }
+            </style>
+        """, unsafe_allow_html=True)
+
         if st.button("🔒 Cerrar Sesión", use_container_width=True, type="secondary"):
             logout()
             st.rerun()
 
-        # ESPACIO FINAL Y CONFIG
-        st.divider()
-        with st.expander("⚙️ Configuración", expanded=False):
-             show_debug = st.toggle("Modo Debug", value=st.session_state.get("show_debug", False))
-             st.session_state["show_debug"] = show_debug
+        # ESPACIO FINAL Y CONFIG (Solo en Desarrollo)
+        from src.config import SHOW_DEBUG_UI
+        if SHOW_DEBUG_UI:
+            st.divider()
+            with st.expander("⚙️ Configuración", expanded=False):
+                 show_debug = st.toggle("Modo Debug", value=st.session_state.get("show_debug", False))
+                 st.session_state["show_debug"] = show_debug
 
     # --- UI Principal ---
     # Títulos neutrales para producción
@@ -276,7 +299,6 @@ def render_dashboard():
             st.rerun()
             
             # --- VIEW JSON PAYLOAD (Added for Debug in Local Mode) ---
-            from src.config import SHOW_DEBUG_UI
             if SHOW_DEBUG_UI:
                 with st.expander("📄 Ver JSON Payload (Debug)"):
                      st.json(content_payload if is_visual else ai_text)

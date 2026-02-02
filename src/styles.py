@@ -1,4 +1,5 @@
 import streamlit as st
+from src.config import IS_PROD
 
 def apply_custom_css():
     st.markdown("""
@@ -162,3 +163,16 @@ def apply_custom_css():
 
     </style>
     """, unsafe_allow_html=True)
+
+    # --- Ocultar Toolbar/Header en Nube ---
+    if IS_PROD:
+        st.markdown("""
+            <style>
+            header, [data-testid="stHeader"], [data-testid="stToolbar"] {
+                visibility: hidden;
+                height: 0% !important;
+            }
+            #MainMenu { visibility: hidden; }
+            footer { visibility: hidden; }
+            </style>
+        """, unsafe_allow_html=True)
