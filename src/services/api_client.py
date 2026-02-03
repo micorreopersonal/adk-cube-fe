@@ -71,3 +71,28 @@ class ApiClient:
             except:
                 pass
             return None
+
+    def reset_session(self, user: UserProfile):
+        """
+        Llama al endpoint /session/reset para borrar la memoria del agente.
+        """
+        url = f"{BACKEND_URL}/session/reset"
+        session_id = f"session-{user.username}"
+        
+        payload = {
+            "session_id": session_id
+        }
+        
+        headers = {
+            "Authorization": f"Bearer {user.token}", 
+            "Content-Type": "application/json"
+        }
+        
+        try:
+            response = requests.post(url, json=payload, headers=headers)
+            response.raise_for_status()
+            return True
+            
+        except Exception as e:
+            print(f"Error resetting session: {e}")
+            return False

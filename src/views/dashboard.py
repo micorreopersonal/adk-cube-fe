@@ -56,7 +56,7 @@ def render_dashboard():
             </style>
         """, unsafe_allow_html=True)
 
-        if st.button("🔒 Cerrar Sesión", use_container_width=True, type="secondary"):
+        if st.button("🔒 Cerrar Sesión", width="stretch", type="secondary"):
             logout()
             st.rerun()
 
@@ -72,13 +72,30 @@ def render_dashboard():
     # Títulos neutrales para producción
     
     # Header de Bienvenida con Estilo
-    st.markdown(f"""
-        <h1 style='color: #1A202C; font-size: 2.2rem;'>¡Hola, {user.name.split(' ')[0]}! 👋</h1>
-        <p style='color: #718096; font-size: 1.1rem;'>
-            Bienvenido a tu <b>Centro de Comando de Talento</b>. ¿Qué insights descubriremos hoy?
-        </p>
-        <br>
-    """, unsafe_allow_html=True)
+    # Header de Bienvenida con Botón de Reinicio
+    h_col1, h_col2 = st.columns([5, 1])
+    with h_col1:
+        st.markdown(f"""
+            <h1 style='color: #1A202C; font-size: 2.2rem;'>¡Hola, {user.name.split(' ')[0]}! 👋</h1>
+            <p style='color: #718096; font-size: 1.1rem;'>
+                Bienvenido a tu <b>Centro de Comando de Talento</b>. ¿Qué insights descubriremos hoy?
+            </p>
+        """, unsafe_allow_html=True)
+    
+    with h_col2:
+        # Alineación y botón de reset
+        st.write("") 
+        st.write("")
+        if st.button("🗑️ Reiniciar", help="Borrar memoria del agente y limpiar chat", width="stretch"):
+             if api_client.reset_session(user):
+                 st.session_state.messages = []
+                 st.session_state.last_api_response = None # Limpiar también el último debug
+                 st.toast("Memoria del agente borrada.", icon="🧹")
+                 st.rerun()
+             else:
+                 st.toast("Error al reiniciar sesión.", icon="❌")
+    
+    st.markdown("<br>", unsafe_allow_html=True)
 
     # Tarjetas de Acción Rápida (Solo si NO hay historial de chat para no saturar)
     if not st.session_state.get("messages"):
@@ -145,28 +162,28 @@ def render_dashboard():
         with s_col1:
             st.markdown("**📊 Tendencias y Evolución**")
             # Usar espacios NO rompibles para separar el bullet
-            if st.button("•  Curva de rotación mensual 2025", use_container_width=True):
+            if st.button("•  Curva de rotación mensual 2025", width="stretch"):
                 st.session_state.messages.append({"role": "user", "content": "Muestra la tendencia mensual de rotación voluntaria e involuntaria del 2025 a nivel de toda la empresa."})
                 st.rerun()
-            if st.button("•  Comparativo 2024 vs 2025", use_container_width=True):
+            if st.button("•  Comparativo 2024 vs 2025", width="stretch"):
                 st.session_state.messages.append({"role": "user", "content": "Genera un gráfico comparativo de la rotación acumulada entre el año 2024 y 2025."})
                 st.rerun()
 
         with s_col2:
             st.markdown("**🔍 Focos y Segmentos**")
-            if st.button("•  Ranking de Divisiones (UO2)", use_container_width=True):
+            if st.button("•  Ranking de Divisiones (UO2)", width="stretch"):
                  st.session_state.messages.append({"role": "user", "content": "¿Cuáles son las 5 divisiones (UO2) con mayor cantidad de renuncias en lo que va del año?"})
                  st.rerun()
-            if st.button("•  FFVV vs Administrativos", use_container_width=True):
+            if st.button("•  FFVV vs Administrativos", width="stretch"):
                  st.session_state.messages.append({"role": "user", "content": "Compara la tasa de rotación entre el segmento Fuerza de Ventas y Administrativos para el año 2025."})
                  st.rerun()
 
         with s_col3:
             st.markdown("**🧠 Insights Profundos**")
-            if st.button("•  Motivos de Salida", use_container_width=True):
+            if st.button("•  Motivos de Salida", width="stretch"):
                  st.session_state.messages.append({"role": "user", "content": "¿Cuáles son los principales motivos de renuncia registrados en el último trimestre de 2025 a nivel de toda la empresa?"})
                  st.rerun()
-            if st.button("•  Listado de Bajas Recientes", use_container_width=True):
+            if st.button("•  Listado de Bajas Recientes", width="stretch"):
                  st.session_state.messages.append({"role": "user", "content": "Dame un listado detallado de las personas que cesaron el último mes cerrado del año 2025 a nivel de toda la empresa."})
                  st.rerun()
     

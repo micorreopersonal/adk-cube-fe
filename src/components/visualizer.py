@@ -3,191 +3,381 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 import uuid
+import traceback
+from src.schemas import VisualBlock, KPICard
 
 class Visualizer:
     @staticmethod
     def render(content: list, key_prefix: str = ""):
         """
-        Renders a list of visual blocks.
+        BlockOrchestrator: Renders a list of visual blocks with Error Boundaries.
+        Uses Pydantic validation (Contract Layer) to ensure data integrity.
         """
         if not content:
             return
 
-        for idx, block in enumerate(content):
-            block_type = block.get("type")
-            payload = block.get("payload")
-            # Unique key for this block instance
-            block_key = f"{key_prefix}_{idx}"
-            
-            if block_type == "text":
-                variant = block.get("variant", "standard")
-                severity = block.get("severity", "info")
-                
-                if variant == "insight":
-                    if severity == "critical":
-                        st.error(payload, icon="🚨")
-                    elif severity == "warning":
-                        st.warning(payload, icon="⚠️")
-                    else:
-                        st.info(payload, icon="ℹ️")
-                elif variant == "clarification":
-                    st.info(payload, icon="🤔") # Visual distinctivo para preguntas de clarificación
+        for idx, raw_block in enumerate(content):
+            # --- 1. Contract Layer (Validation) ---
+            try:
+                # Validate the block structure using Pydantic
+                # If raw_block is already a dict, we validate it.
+                if isinstance(raw_block, dict):
+                   block = VisualBlock(**raw_block)
                 else:
-                    st.markdown(payload)
-                
-            elif block_type == "kpi_row":
-                Visualizer._render_kpis(payload)
-                
-            elif block_type == "plot":
-                Visualizer._render_plot(block, key_prefix=block_key)
-                
-            elif block_type == "table":
-                Visualizer._render_table(payload, key_prefix=block_key)
-            
-            elif block_type == "data_series":
-                metadata = block.get("metadata", {})
-                Visualizer._render_interactive_series(payload, metadata, key_prefix=block_key)
-            
-            elif block_type == "debug_sql":
+                   # Fallback or skip if malformed
+                   continue
+            except Exception as e:
+                # Validation Error: Log but continue rendering other blocks
+                # In dev mode, we might want to show this.
                 from src.config import SHOW_DEBUG_UI
                 if SHOW_DEBUG_UI:
-                    with st.expander("🔍 Ver Query SQL (Debug)", expanded=False):
-                        st.code(payload, language="sql")
+                    st.error(f"❌ Contract Violation (Block #{idx}): {e}")
+                continue
 
-            elif block_type == "talent_matrix":
+            # --- 2. Block Rendering (With Error Boundary) ---
+            block_key = f"{key_prefix}_{idx}"
+            
+            try:
+                Visualizer._render_block(block, block_key)
+            except Exception as e:
+                # --- 3. Error Boundary (Fallback) ---
+                st.error(f"⚠️ Error visualizando bloque '{block.type}': {e}")
+                # Log full trace for devs
+                # st.caption(traceback.format_exc())
+
+    @staticmethod
+    def _render_block(block: VisualBlock, block_key: str):
+        """
+        Dispatches the block to the correct renderer based on type.
+        """
+        b_type = block.type
+        payload = block.payload
+        metadata = block.metadata or {}
+        
+        if b_type == "text":
+            Visualizer._render_text(block)
+                
+        # --- V2: Semantic Cube Contract ---
+        elif b_type == "KPI_ROW":
+            # Payload is List[IndicatorInternal] or similar list of dicts
+            Visualizer._render_kpis_v2(payload)
+
+        elif b_type == "CHART":
+            # Payload is ChartPayload dict with labels/datasets
+            Visualizer._render_chart_v2(payload, block.subtype, metadata, block_key)
+
+        elif b_type == "TABLE":
+            # Payload is TablePayload dict with headers/rows
+            Visualizer._render_table_v2(payload, metadata, block_key)
+            
+        # --- V1: Legacy Handover ---
+        elif b_type == "kpi_row":
+            if isinstance(payload, list):
+                 Visualizer._render_kpis(payload) # Legacy renderer
+                
+        elif b_type == "plot":
+            if isinstance(payload, dict):
+                 Visualizer._render_plot_block(payload, metadata, block_key) 
+                
+        elif b_type == "table":
+             if isinstance(payload, list): # Legacy is list of dicts
+                Visualizer._render_table(payload, key_prefix=block_key)
+            
+        elif b_type == "data_series":
+             if isinstance(payload, dict):
+                Visualizer._render_interactive_series(payload, metadata, key_prefix=block_key)
+            
+        elif b_type == "debug_sql":
+            from src.config import SHOW_DEBUG_UI
+            if SHOW_DEBUG_UI:
+                with st.expander("🔍 Ver Query SQL (Debug)", expanded=False):
+                    st.code(str(payload), language="sql")
+
+        elif b_type == "talent_matrix":
+             if isinstance(payload, dict):
                 Visualizer._render_talent_matrix(payload, key_prefix=block_key)
+        
+        else:
+             pass
+
+    @staticmethod
+    def _render_text(block: VisualBlock):
+        variant = block.variant
+        severity = block.severity
+        content = block.payload
+        if isinstance(content, dict):
+            content = content.get("text", str(content))
+        
+        if variant == "insight":
+            if severity == "critical":
+                st.error(content, icon="🚨")
+            elif severity == "warning":
+                st.warning(content, icon="⚠️")
+            else:
+                st.info(content, icon="ℹ️")
+        elif variant == "clarification":
+            st.info(content, icon="🤔")
+        else:
+            st.markdown(content)
+
+    # --- V2 RENDERERS ---
+
+    @staticmethod
+    def _render_kpis_v2(kpis: list):
+        if not kpis: return
+        cols = st.columns(len(kpis))
+        for idx, item in enumerate(kpis):
+            # Compatibility: Pydantic vs Dict
+            if hasattr(item, "dict"): item = item.dict()
+            elif hasattr(item, "model_dump"): item = item.model_dump()
+            
+            with cols[idx]:
+                # Map STATUS -> Streamlit Colors
+                status_val = (item.get("status") or "standard").upper()
+                delta_color = "normal"
+                if status_val in ["CRITICAL", "BAD", "RED"]:
+                    delta_color = "inverse"
+                elif status_val in ["SUCCESS", "GOOD", "GREEN"]:
+                    delta_color = "normal"
+                elif status_val in ["NEUTRAL", "STANDARD", "BLUE"]:
+                    delta_color = "off"
+                
+                # Render
+                st.metric(
+                    label=item.get("label"),
+                    value=item.get("value"),
+                    delta=item.get("delta"),
+                    delta_color=delta_color,
+                    help=item.get("tooltip")
+                )
+
+    @staticmethod
+    def _render_chart_v2(payload: dict, subtype: str, metadata: dict, key_prefix: str):
+        # Payload: { labels: [], datasets: [{label, data, ...}] }
+        if hasattr(payload, "dict"): payload = payload.dict() # Handle Pydantic
+        
+        labels = payload.get("labels", [])
+        datasets = payload.get("datasets", [])
+        
+        if not datasets:
+            st.warning("⚠️ Gráfico sin datos.")
+            return
+
+        # --- Filtering Logic ---
+        import hashlib
+        data_hash = hashlib.md5(str(payload).encode()).hexdigest()[:8]
+        
+        selected_labels = st.multiselect(
+            "🔍 Filtrar Dimensión:",
+            options=labels,
+            default=labels,
+            key=f"filter_v2_{key_prefix}_{data_hash}"
+        )
+        
+        if not selected_labels:
+            st.warning("⚠️ Selecciona al menos un elemento.")
+            return
+
+        # Apply Filter
+        indices = [i for i, label in enumerate(labels) if label in selected_labels]
+        filtered_labels = selected_labels
+        filtered_datasets = []
+        for ds in datasets:
+            new_ds = ds.copy()
+            new_ds["data"] = [ds["data"][i] for i in indices]
+            filtered_datasets.append(new_ds)
+
+        # Restore Tabs: Line, Bar, Table
+        tab_list = ["📈 Línea", "📊 Barras", "📋 Tabla"]
+        tabs = st.tabs(tab_list)
+        
+        # Colors
+        COLORS = ['#EF3340', '#3949AB', '#00897B', '#FB8C00', '#757575', '#8E24AA']
+        
+        # --- TAB 1 & 2: Charts ---
+        for tab_idx, chart_type_target in enumerate(["LINE", "BAR"]):
+            with tabs[tab_idx]:
+                fig = go.Figure()
+                for idx, ds in enumerate(filtered_datasets):
+                    ds_label = ds.get("label", f"Serie {idx+1}")
+                    ds_data = ds.get("data", [])
+                    color = ds.get("color") or COLORS[idx % len(COLORS)]
+                    
+                    if chart_type_target == "BAR":
+                        fig.add_trace(go.Bar(
+                            x=filtered_labels,
+                            y=ds_data,
+                            name=ds_label,
+                            marker_color=color,
+                            text=[f"{v:.1f}%" if isinstance(v, (int, float)) and v < 100 else v for v in ds_data],
+                            textposition="auto"
+                        ))
+                    else: # LINE
+                        fig.add_trace(go.Scatter(
+                            x=filtered_labels,
+                            y=ds_data,
+                            mode='lines+markers+text',
+                            name=ds_label,
+                            line=dict(color=color, width=3),
+                            marker=dict(size=8),
+                            text=[f"{v:.1f}%" if isinstance(v, (int, float)) and v < 100 else v for v in ds_data],
+                            textposition="top center"
+                        ))
+
+                fig.update_layout(
+                    title=metadata.get("title", ""),
+                    xaxis_title="Dimension",
+                    yaxis_title=metadata.get("y_axis_label", "Valor"),
+                    template="plotly_white",
+                    height=500,
+                    hovermode="x unified",
+                    showlegend=metadata.get("show_legend", True),
+                    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+                )
+                st.plotly_chart(fig, use_container_width=True, key=f"{key_prefix}_{chart_type_target}_{data_hash}")
+
+        # --- TAB 3: Table ---
+        with tabs[2]:
+            # Reconstruct Table from Labes + Datasets (Filtered)
+            table_dict = {"Eje": filtered_labels}
+            for ds in filtered_datasets:
+                ds_label = ds.get("label", "Serie")
+                table_dict[ds_label] = ds.get("data", [])
+            
+            df_table = pd.DataFrame(table_dict)
+            st.dataframe(df_table, use_container_width=True, hide_index=True)
+            
+            # Download Button
+            csv = df_table.to_csv(index=False).encode('utf-8')
+            st.download_button(
+                label="📥 Descargar CSV",
+                data=csv,
+                file_name=f"reporte_{key_prefix}.csv",
+                mime='text/csv',
+                key=f"dl_{key_prefix}_{data_hash}"
+            )
+
+    @staticmethod
+    def _render_table_v2(payload: dict, metadata: dict, key_prefix: str):
+        # Payload: { headers: [], rows: [] }
+        if hasattr(payload, "dict"): payload = payload.dict()
+        
+        headers = payload.get("headers", [])
+        rows = payload.get("rows", [])
+        
+        if not headers or not rows:
+            st.warning("⚠️ Tabla sin datos.")
+            return
+            
+        df = pd.DataFrame(rows, columns=headers)
+        st.dataframe(df, use_container_width=True, hide_index=True)
+
+    @staticmethod
+    def _detect_x_axis(data: dict) -> str:
+        """Helper to find the likely x-axis key."""
+        # Priority 1: 'months' for backward compatibility
+        if 'months' in data: return 'months'
+        # Priority 2: Common categorical keys
+        for key in ['division', 'area', 'uo', 'category', 'names', 'labels', 'x', 'anio', 'year', 'periodo']:
+            if key in data: return key
+        # Priority 3: First key that is a list of strings (heuristic)
+        for key, val in data.items():
+            if isinstance(val, list) and len(val) > 0 and isinstance(val[0], str):
+                return key
+        return None
+
+    @staticmethod
+    def _get_plotting_keys(data: dict, x_key: str, metadata: dict) -> list:
+        """Determines which series to plot based on strict metadata or heuristics."""
+        if metadata and metadata.get("series_names"):
+            return list(metadata.get("series_names").keys())
+        # Fallback: Exclude known non-metric keys
+        return [k for k in data.keys() if k not in [x_key, 'headcount', 'ceses', 'renuncias', 'involuntarios', 'anio', 'year', 'periodo']]
 
     @staticmethod
     def _create_line_chart(data, metadata):
         fig = go.Figure()
+        x_key = Visualizer._detect_x_axis(data) or 'months'
+        x_values = data.get(x_key, [])
         
-        # Prepare custom data for tooltips
-        months = data.get('months', [])
+        # Determine strict list of metrics to plot
+        keys = Visualizer._get_plotting_keys(data, x_key, metadata)
         
-        # Determine specific colors
-        COLOR_PRIMARY = '#EF3340' # Red
-        COLOR_SECONDARY = '#3949AB' # Indigo
-        COLOR_TERTIARY = '#757575' # Grey
+        # Check for Grouping (Long Format)
+        # If X-axis has duplicates, we likely need to group by another column (e.g. anio)
+        has_duplicates = len(x_values) != len(set(x_values))
+        group_col = None
         
-        # Check if it is a comparison
-        is_comparison = metadata.get("type") == "comparison"
-        
-        if is_comparison:
-            # --- LOGIC FOR COMPARISON (Multi-Line) ---
-            years = []
-            if "primary_year" in metadata: years.append(str(metadata["primary_year"]))
-            if "secondary_year" in metadata: years.append(str(metadata["secondary_year"]))
-            
-            # Map colors
-            color_map = {
-                0: COLOR_PRIMARY,    # Primary Year
-                1: COLOR_SECONDARY,  # Secondary Year
-                2: COLOR_TERTIARY
-            }
+        if has_duplicates:
+             # Find candidate: not X, not a metric
+             candidates = [k for k in data.keys() if k != x_key and k not in keys]
+             if candidates:
+                 group_col = candidates[0] # Take first candidate like 'anio'
 
-            for idx, year_key in enumerate(years):
-                year_color = color_map.get(idx, COLOR_TERTIARY)
+        # Paleta de colores RIMAC y complementarios
+        COLORS = ['#EF3340', '#3949AB', '#00897B', '#FB8C00', '#757575', '#8E24AA']
+        
+        if group_col:
+            # --- Grouped Line Chart ---
+            unique_groups = sorted(list(set(data[group_col])))
+            for g_idx, group_val in enumerate(unique_groups):
+                # Filter indices
+                indices = [i for i, x in enumerate(data[group_col]) if x == group_val]
                 
-                # General Turnover Line
-                if year_key in data:
-                    series_data = data[year_key]
-                    # Voluntary Key
-                    vol_key = f"{year_key} Voluntaria"
-                    vol_data = data.get(vol_key, [0]*len(series_data))
+                for k_idx, key in enumerate(keys):
+                    # Filter data
+                    y_subset = [data[key][i] for i in indices]
+                    x_subset = [data[x_key][i] for i in indices]
+                    
+                    series_name = metadata.get("series_names", {}).get(key, key)
+                    trace_name = f"{series_name} ({group_val})"
+                    
+                    color = COLORS[(g_idx * len(keys) + k_idx) % len(COLORS)]
                     
                     fig.add_trace(go.Scatter(
-                        x=months,
-                        y=series_data,
+                        x=x_subset,
+                        y=y_subset,
                         mode='lines+markers+text',
-                        name=f'Rotación {year_key}',
-                        line=dict(color=year_color, width=3),
-                        marker=dict(size=8),
-                        text=[f"{v:.2f}%" for v in series_data],
+                        name=trace_name,
+                        line=dict(color=color, width=3),
+                        text=[f"{v:.1f}%" if isinstance(v, (int, float)) and v < 100 else v for v in y_subset],
                         textposition="top center",
-                        hovertemplate=f"<b>{year_key}</b><br>Mes: %{{x}}<br>Rotación: %{{y}}%<extra></extra>"
+                        hovertemplate=f"<b>{trace_name}</b><br>{x_key}: %{{x}}<br>Valor: %{{y}}<extra></extra>"
                     ))
-                    
-                    # Voluntary Line (Dashed)
-                    fig.add_trace(go.Scatter(
-                        x=months,
-                        y=vol_data,
-                        mode='lines+markers+text', # Text enabled
-                        name=f'Voluntaria {year_key}',
-                        line=dict(color=year_color, width=2, dash='dot'),
-                        marker=dict(size=6, symbol='circle-open'),
-                        text=[f"{v:.2f}%" for v in vol_data],
-                        textposition="bottom center",
-                        hovertemplate=f"<b>{year_key} (Vol)</b><br>Mes: %{{x}}<br>Rotación: %{{y}}%<extra></extra>"
-                    ))
-
-                    # Involuntary Line (Dotted - Diamond)
-                    inv_key = f"{year_key} Involuntaria"
-                    inv_data = data.get(inv_key, [0]*len(series_data))
-                    
-                    fig.add_trace(go.Scatter(
-                        x=months,
-                        y=inv_data,
-                        mode='lines+markers+text', 
-                        name=f'Involuntaria {year_key}',
-                        line=dict(color=year_color, width=2, dash='dot'),
-                        marker=dict(size=6, symbol='diamond-open'),
-                        text=[f"{v:.2f}%" for v in inv_data],
-                        textposition="bottom center",
-                        hovertemplate=f"<b>{year_key} (Inv)</b><br>Mes: %{{x}}<br>Rotación: %{{y}}%<extra></extra>"
-                    ))
-
         else:
-            # --- LEGACY LOGIC (Single Year) ---
-            hc = data.get('headcount', [None] * len(months))
-            ceses = data.get('ceses', [None] * len(months))
-            renuncias = data.get('renuncias', [None] * len(months))
-            
-            # Trace Rotación General
-            fig.add_trace(go.Scatter(
-                x=months,
-                y=data.get('rotacion_general', []),
-                mode='lines+markers+text',
-                name='Rotación General',
-                line=dict(color=COLOR_PRIMARY, width=3),
-                marker=dict(size=8),
-                text=[f"{v}%" for v in data.get('rotacion_general', [])],
-                textposition="top center",
-                customdata=list(zip(hc, ceses)),
-                hovertemplate="<b>%{x}</b><br>Rotación: %{y}%<br>Dotación: %{customdata[0]}<br>Salidas Totales: %{customdata[1]}<extra></extra>"
-            ))
+            # --- Standard Line Chart ---
+            for idx, key in enumerate(keys):
+                series_data = data[key]
+                color = COLORS[idx % len(COLORS)]
+                
+                # Detect special semantics
+                line_style = dict(color=color, width=3)
+                marker_symbol = 'circle'
+                if "voluntaria" in key.lower():
+                    line_style.update({'dash': 'dot', 'width': 2})
+                    marker_symbol = 'circle-open'
+                elif "involuntaria" in key.lower():
+                    line_style.update({'dash': 'dashdot', 'width': 2})
+                    marker_symbol = 'diamond-open'
 
-            # Trace Rotación Involuntaria
-            fig.add_trace(go.Scatter(
-                x=months,
-                y=data.get('rotacion_involuntaria', []),
-                mode='lines+markers+text',
-                name='Rotación Involuntaria',
-                line=dict(color='#1E88E5', width=3, dash='dot'),
-                marker=dict(size=8, symbol='diamond'),
-                text=[f"{v}%" for v in data.get('rotacion_involuntaria', [])],
-                textposition="bottom center",
-                customdata=data.get('involuntarios', [0]*len(months)),
-                hovertemplate="Involuntaria: %{y}%<br>Salidas Inv.: %{customdata}<extra></extra>"
-            ))
+                series_name = metadata.get("series_names", {}).get(key, key)
 
-            # Trace Rotación Voluntaria
-            fig.add_trace(go.Scatter(
-                x=months,
-                y=data.get('rotacion_voluntaria', []),
-                mode='lines+markers+text',
-                name='Rotación Voluntaria',
-                line=dict(color='#B0B0B0', width=3, dash='dot'),
-                marker=dict(size=8),
-                text=[f"{v}%" for v in data.get('rotacion_voluntaria', [])],
-                textposition="top center",
-                customdata=renuncias,
-                hovertemplate="Voluntaria: %{y}%<br>Salidas Vol.: %{customdata}<extra></extra>"
-            ))
+                fig.add_trace(go.Scatter(
+                    x=x_values,
+                    y=series_data,
+                    mode='lines+markers+text',
+                    name=series_name,
+                    line=line_style,
+                    marker=dict(size=8, symbol=marker_symbol),
+                    text=[f"{v:.2f}%" if isinstance(v, (int, float)) else v for v in series_data],
+                    textposition="top center",
+                    hovertemplate=f"<b>{series_name}</b><br>{x_key.capitalize()}: %{{x}}<br>Valor: %{{y}}%<extra></extra>"
+                ))
 
         fig.update_layout(
-            title=f"Dinámica Mensual de Rotación {metadata.get('year', '')}",
-            xaxis_title="Mes",
-            yaxis_title="Tasa de Rotación (%)",
+            title=metadata.get('title', f"Dinámica {metadata.get('year', '')}"),
+            xaxis_title=x_key.capitalize(),
+            yaxis_title=metadata.get('y_label', "Valor"),
             hovermode='x unified',
             template='plotly_white',
             height=500,
@@ -197,63 +387,74 @@ class Visualizer:
 
     @staticmethod
     def _create_bar_chart(data, metadata):
-        months = data.get('months', [])
-        hc = data.get('headcount', [None] * len(months))
-        ceses = data.get('ceses', [None] * len(months))
-        renuncias = data.get('renuncias', [None] * len(months))
-        involuntarios = data.get('involuntarios', [None] * len(months))
-
-        df_bar = pd.DataFrame({
-            'Mes': months,
-            'General': data.get('rotacion_general', []),
-            'Voluntaria': data.get('rotacion_voluntaria', []),
-            'Involuntaria': data.get('rotacion_involuntaria', []),
-            'hc': hc,
-            'ceses': ceses,
-            'ren': renuncias
-        })
         fig = go.Figure()
+        x_key = Visualizer._detect_x_axis(data) or 'months'
+        x_values = data.get(x_key, [])
         
-        # Bar General: Show HC and Total Salidas
-        fig.add_trace(go.Bar(
-            x=df_bar['Mes'],
-            y=df_bar['General'],
-            name='General',
-            marker_color='#EF3340',
-            text=df_bar['General'].apply(lambda x: f"{x}%"),
-            textposition='auto',
-            customdata=list(zip(df_bar['hc'], df_bar['ceses'])),
-            hovertemplate="<b>%{x}</b><br>General: %{y}%<br>Dotación: %{customdata[0]}<br>Salidas Totales: %{customdata[1]}<extra></extra>"
-        ))
+        keys = Visualizer._get_plotting_keys(data, x_key, metadata)
+        
+        # Check for Grouping
+        has_duplicates = len(x_values) != len(set(x_values))
+        group_col = None
+        if has_duplicates:
+            candidates = [k for k in data.keys() if k != x_key and k not in keys]
+            if candidates: group_col = candidates[0]
 
-        # Bar Voluntaria: Show only Salidas Vol.
-        fig.add_trace(go.Bar(
-            x=df_bar['Mes'],
-            y=df_bar['Voluntaria'],
-            name='Voluntaria',
-            marker_color='#B0B0B0',
-            text=df_bar['Voluntaria'].apply(lambda x: f"{x}%"),
-            textposition='auto',
-            customdata=df_bar['ren'],
-            hovertemplate="Voluntaria: %{y}%<br>Salidas Vol.: %{customdata}<extra></extra>"
-        ))
+        COLORS = ['#EF3340', '#3949AB', '#00897B', '#FB8C00', '#757575', '#8E24AA']
+        
+        if group_col:
+            # --- Grouped Bar Chart ---
+            # Sort X-Axis to ensure groups are clustered properly on categorical axes
+            # Actually, standard bar charts handle categories. 
+            # We just need to add traces per Group.
+            unique_groups = sorted(list(set(data[group_col])))
+            
+            for g_idx, group_val in enumerate(unique_groups):
+                indices = [i for i, x in enumerate(data[group_col]) if x == group_val]
+                
+                for k_idx, key in enumerate(keys):
+                    y_subset = [data[key][i] for i in indices]
+                    x_subset = [data[x_key][i] for i in indices]
+                    
+                    series_name = metadata.get("series_names", {}).get(key, key)
+                    trace_name = f"{series_name} ({group_val})" if len(keys) > 1 else str(group_val)
+                    
+                    if len(keys) == 1:
+                         # Single metric, group is the legend
+                         color = COLORS[g_idx % len(COLORS)]
+                    else:
+                         color = COLORS[k_idx % len(COLORS)] # Metric is color, or mix? Let's use group color for simple comparison
 
-        # Bar Involuntaria
-        fig.add_trace(go.Bar(
-            x=df_bar['Mes'],
-            y=df_bar['Involuntaria'],
-            name='Involuntaria',
-            marker_color='#1E88E5',
-            text=df_bar['Involuntaria'].apply(lambda x: f"{x}%"),
-            textposition='auto',
-            customdata=df_bar['involuntarios'] if 'involuntarios' in df_bar else [0]*len(months),
-            hovertemplate="Involuntaria: %{y}%<br>Salidas Inv.: %{customdata}<extra></extra>"
-        ))
+                    fig.add_trace(go.Bar(
+                        x=x_subset,
+                        y=y_subset,
+                        name=trace_name,
+                        marker_color=color,
+                        text=[f"{v:.1f}" if isinstance(v, (int, float)) else v for v in y_subset],
+                        textposition='auto',
+                        hovertemplate=f"<b>{trace_name}</b><br>{x_key}: %{{x}}<br>Valor: %{{y}}<extra></extra>"
+                    ))
+        else:
+            # --- Standard Bar Chart ---
+            for idx, key in enumerate(keys):
+                series_data = data[key]
+                color = COLORS[idx % len(COLORS)]
+                series_name = metadata.get("series_names", {}).get(key, key)
+                
+                fig.add_trace(go.Bar(
+                    x=x_values,
+                    y=series_data,
+                    name=series_name,
+                    marker_color=color,
+                    text=[f"{v:.1f}%" if isinstance(v, (int, float)) else v for v in series_data],
+                    textposition='auto',
+                    hovertemplate=f"<b>{series_name}</b><br>{x_key.capitalize()}: %{{x}}<br>Valor: %{{y}}%<extra></extra>"
+                ))
 
         fig.update_layout(
-            title=f"Comparativa Mensual {metadata.get('year', '')}",
-            xaxis_title="Mes",
-            yaxis_title="Tasa de Rotación (%)",
+            title=metadata.get('title', f"Comparativa {metadata.get('year', '')}"),
+            xaxis_title=x_key.capitalize(),
+            yaxis_title=metadata.get('y_label', "Valor"),
             barmode='group',
             template='plotly_white',
             height=500
@@ -264,7 +465,6 @@ class Visualizer:
     def get_figures_from_content(content: list) -> list:
         """
         Extrae figuras de bloques visuales para su uso en reportes (PDF).
-        Retorna lista de dicts: {'title': str, 'fig': go.Figure}
         """
         figures = []
         for block in content:
@@ -274,10 +474,10 @@ class Visualizer:
                 
                 # Generamos ambas vistas para el reporte
                 fig_line = Visualizer._create_line_chart(payload, metadata)
-                figures.append({"title": "Tendencia Mensual", "fig": fig_line})
+                figures.append({"title": "Tendencia", "fig": fig_line})
                 
                 fig_bar = Visualizer._create_bar_chart(payload, metadata)
-                figures.append({"title": "Comparativa de Rotación", "fig": fig_bar})
+                figures.append({"title": "Comparativa", "fig": fig_bar})
                 
             elif block.get("type") == "plot" and "data" in block:
                 # Reconstruir plot simple (limitado por ahora)
@@ -285,74 +485,121 @@ class Visualizer:
         return figures
 
     @staticmethod
+    def _normalize_wide_data(data: dict) -> dict:
+        """
+        Attempts to transform 'wide' comparison data (e.g. anio_2024, ceses_2024, anio_2025, ceses_2025)
+        into a standard 'long' format (e.g. Periodo: [2024, 2025], Ceses: [851, 1130]).
+        """
+        import re
+        
+        # 1. Identify distinct years/periods from keys like 'anio_2024', 'year_2025'
+        years = set()
+        pattern = re.compile(r'.*_(20\d{2})$') # Matches suffixes like _2024
+        
+        for key in data.keys():
+            match = pattern.search(key)
+            if match:
+                years.add(match.group(1))
+        
+        if not years:
+            return None
+            
+        sorted_years = sorted(list(years))
+        
+        # 2. Reconstruct metrics
+        # We need to find the "base" metric names. 
+        # e.g. 'ceses_2024' -> base 'ceses'
+        normalized = {"Periodo": sorted_years}
+        
+        # Find all metric bases
+        metric_bases = set()
+        for key in data.keys():
+            for y in sorted_years:
+                if key.endswith(f"_{y}"):
+                    base = key.replace(f"_{y}", "")
+                    # Filter out the dimension keys themselves (anio_, year_)
+                    if base not in ['anio', 'year', 'periodo']:
+                        metric_bases.add(base)
+        
+        if not metric_bases:
+             return None
+
+        # 3. Build lists
+        for metric in metric_bases:
+            values = []
+            for y in sorted_years:
+                # Construct key e.g. ceses_2024
+                # Data values are lists like [851], so take [0]
+                col_key = f"{metric}_{y}"
+                val_list = data.get(col_key, [None])
+                val = val_list[0] if val_list else None
+                values.append(val)
+            normalized[metric] = values
+            
+        return normalized
+
+    @staticmethod
     def _render_interactive_series(data: dict, metadata: dict, key_prefix: str = ""):
         """
-        Renders an interactive time-series visualization with tabs for different views.
+        Renders an interactive visualization with tabs (agnostic X-axis).
         """
         if not data:
             return
             
-        # --- Filtering Logic ---
-        all_months = data.get('months', [])
+        # --- X-Axis Detection ---
+        x_key = Visualizer._detect_x_axis(data)
         
-        # FIX: Normalizar longitudes de los arrays para evitar errores en pandas
-        # Asegura que todos los arrays tengan el mismo largo que 'months' antes de filtrar
-        target_len = len(all_months)
-        keys_to_sync = ['rotacion_general', 'rotacion_voluntaria', 'rotacion_involuntaria', 'headcount', 'ceses', 'renuncias', 'involuntarios']
+        # Fallback: Try Wide Format Normalization
+        if not x_key:
+            normalized = Visualizer._normalize_wide_data(data)
+            if normalized:
+                data = normalized
+                x_key = "Periodo" # We created this key
         
-        for k in keys_to_sync:
+        if not x_key:
+             st.warning("⚠️ No se pudo detectar una serie válida para el Eje X.")
+             return
+             
+        x_values = data.get(x_key, [])
+        target_len = len(x_values)
+        
+        # Identificar series de datos (excluyendo eje X)
+        all_keys = [k for k in data.keys() if k != x_key]
+        
+        # --- Normalización Dinámica ---
+        for k in all_keys:
             current_list = data.get(k, [])
-            if current_list is None: 
-                current_list = []
-            current_list = list(current_list) # Force list type
+            if current_list is None: current_list = []
+            current_list = list(current_list)
             
             if len(current_list) < target_len:
-                # Pad with None per consistency
                 current_list.extend([None] * (target_len - len(current_list)))
                 data[k] = current_list
             elif len(current_list) > target_len:
-                # Truncate
                 data[k] = current_list[:target_len]
         
-        # Determine unique key for multiselect to avoid conflicts
-        # Using a deterministic hash based on data content
         import hashlib
         data_hash = hashlib.md5(str(data).encode()).hexdigest()[:8]
         
-        selected_months = st.multiselect(
-            "📅 Filtrar Meses:",
-            options=all_months,
-            default=all_months,
-            key=f"filter_months_{data_hash}_{key_prefix}"
+        selected_items = st.multiselect(
+            f"📅 Filtrar {x_key.capitalize()}:",
+            options=x_values,
+            default=x_values,
+            key=f"filter_{x_key}_{data_hash}_{key_prefix}"
         )
         
-        # Apply filter if selection changes
-        filtered_data = data.copy()
-        if selected_months and len(selected_months) != len(all_months):
-            # Get indices of selected months
-            # Assumes 'months' are unique. If not, this logic might need refinement, 
-            # but usually months in timeseries are unique.
-            indices = [i for i, m in enumerate(all_months) if m in selected_months]
-            
-            # Helper to filter list by indices
-            def filter_list(lst):
-                return [lst[i] for i in indices] if lst and len(lst) == len(all_months) else lst
-
-            # Filter all relevant keys
-            filtered_data['months'] = filter_list(data.get('months', []))
-            filtered_data['rotacion_general'] = filter_list(data.get('rotacion_general', []))
-            filtered_data['rotacion_voluntaria'] = filter_list(data.get('rotacion_voluntaria', []))
-            filtered_data['rotacion_involuntaria'] = filter_list(data.get('rotacion_involuntaria', []))
-            filtered_data['headcount'] = filter_list(data.get('headcount', []))
-            filtered_data['ceses'] = filter_list(data.get('ceses', []))
-            filtered_data['renuncias'] = filter_list(data.get('renuncias', []))
-            filtered_data['involuntarios'] = filter_list(data.get('involuntarios', []))
+        # Aplicar filtro dinámicamente
+        filtered_data = {x_key: []}
+        if selected_items:
+            indices = [i for i, m in enumerate(x_values) if m in selected_items]
+            filtered_data[x_key] = selected_items
+            for k in all_keys:
+                 filtered_data[k] = [data[k][i] for i in indices]
         
-        if not selected_months:
-             st.warning("⚠️ Selecciona al menos un mes para visualizar.")
+        if not selected_items:
+             st.warning("⚠️ Selecciona al menos un elemento para visualizar.")
              return
 
-        # Create tabs for different visualizations
         tab1, tab2, tab3 = st.tabs(["📈 Gráfico de Línea", "📊 Gráfico de Barras", "📋 Tabla Detallada"])
         
         with tab1:
@@ -364,30 +611,28 @@ class Visualizer:
             st.plotly_chart(fig, width='stretch', key=f"bar_{data_hash}_{key_prefix}")
         
         with tab3:
-            # Detailed Table
-            df_table = pd.DataFrame({
-                'Mes': filtered_data.get('months', []),
-                'Rotación General (%)': filtered_data.get('rotacion_general', []),
-                'Rotación Voluntaria (%)': filtered_data.get('rotacion_voluntaria', []),
-                'Rotación Involuntaria (%)': filtered_data.get('rotacion_involuntaria', []),
-                'Headcount Base': filtered_data.get('headcount', []),
-                'Total Ceses': filtered_data.get('ceses', []),
-                'Renuncias': filtered_data.get('renuncias', []),
-                'Involuntarias': filtered_data.get('involuntarios', [])
-            })
+            # Construcción dinámica del DataFrame para la tabla
+            table_dict = {x_key.capitalize(): filtered_data[x_key]}
+            for k in all_keys:
+                # Formatear el nombre de la columna
+                col_name = k.replace('_', ' ').title()
+                if any(x in k.lower() for x in ['rotacion', 'tasa', 'porcentaje']):
+                    col_name += ' (%)'
+                table_dict[col_name] = filtered_data[k]
+                
+            df_table = pd.DataFrame(table_dict)
             
-            # Download button
             csv = df_table.to_csv(index=False).encode('utf-8')
             st.download_button(
                 label="📥 Descargar CSV",
                 data=csv,
-                file_name=f"rotacion_mensual_{metadata.get('year', '')}.csv",
+                file_name=f"reporte_{x_key}_{metadata.get('year', '')}.csv",
                 mime="text/csv",
                 key=f"dl_series_{data_hash}_{key_prefix}"
             )
             
             st.dataframe(df_table, width='stretch', hide_index=True)
-            st.caption(f"Mostrando {len(df_table)} meses seleccionados.")
+            st.caption(f"Mostrando {len(df_table)} elementos seleccionados.")
 
     @staticmethod
     def _render_kpis(kpis: list):
@@ -395,27 +640,26 @@ class Visualizer:
             return
         cols = st.columns(len(kpis))
         for idx, kpi in enumerate(kpis):
+            # Compatibility: Handle Pydantic Models (from new Engine) vs Dicts (legacy)
+            if hasattr(kpi, "dict"): 
+                kpi = kpi.dict()
+            elif hasattr(kpi, "model_dump"): # Pydantic v2
+                kpi = kpi.model_dump()
+                
             with cols[idx]:
                 # Streamlit.metric solo acepta: 'normal', 'inverse', 'off'
                 # Mapeo de intención semántica (Colors from backend -> Streamlit types)
-                raw_color = kpi.get("color", "normal").lower()
-                
-                # Logic: 
-                # red -> inverse (assuming bad thing increased or good thing decreased, standard behavior relies on delta sign)
-                # But to force specific behaviors we might need to rely on delta coloring logic.
-                # Streamlit defaults: Positive delta = Green (normal), Negative = Red (inverse).
+                # Mapping: red->inverse (red), green->normal (green), blue/standard->off (gray)
+                raw_color = str(kpi.get("color", "standard")).lower()
                 
                 final_color = "normal"
                 if raw_color in ["red", "inverse", "critical"]:
                     final_color = "inverse"
-                elif raw_color in ["green", "normal", "good"]:
+                elif raw_color in ["green", "good"]:
                     final_color = "normal"
-                elif raw_color == "off":
+                elif raw_color in ["blue", "standard", "off", "neutral"]:
                     final_color = "off"
                 
-                # Note: "orange" or "blue" are not supported by st.metric delta_color. 
-                # We fallback to normal or off.
-
                 st.metric(
                     label=kpi.get("label"),
                     value=kpi.get("value"),
@@ -425,13 +669,17 @@ class Visualizer:
                 )
 
     @staticmethod
-    def _render_plot(block: dict, key_prefix: str = ""):
-        subtype = block.get("subtype", "bar")
-        data = block.get("data", {})
-        title = block.get("title", "")
+    def _render_plot_block(payload: dict, metadata: dict = None, key_prefix: str = ""):
+        subtype = payload.get("subtype", "bar")
+        data = payload.get("data", {})
+        title = payload.get("title", "")
+        if metadata:
+             # Metadata might override or augment
+             title = metadata.get("title", title)
+             
         # Try to get axis labels from data keys if possible, or metadata
-        x_label = block.get("x_label") or data.get("x_label") or "Categoría"
-        y_label = block.get("y_label") or data.get("y_label") or "Valor"
+        x_label = payload.get("x_label") or data.get("x_label") or "Categoría"
+        y_label = payload.get("y_label") or data.get("y_label") or "Valor"
         
         if title:
             st.subheader(title)
@@ -712,7 +960,7 @@ class Visualizer:
             template="plotly_white"
         )
         
-        st.plotly_chart(fig, use_container_width=True, key=f"9box_{key_prefix}")
+        st.plotly_chart(fig, width="stretch", key=f"9box_{key_prefix}")
         
         with st.expander("📚 ¿Cómo leer el Mapeo de Talento?"):
             st.markdown("""

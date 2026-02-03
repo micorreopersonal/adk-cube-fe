@@ -96,6 +96,25 @@ def apply_custom_css():
             text-transform: uppercase;
             letter-spacing: 0.05em;
         }
+
+        /* Executive Color Homologation (Handover Specs) */
+        [data-testid="stMetricDelta"] {
+            font-weight: 600 !important;
+        }
+        
+        /* Green (Normal) */
+        [data-testid="stMetricDelta"] > div[dir="ltr"] {
+            color: #10B981 !important;
+        }
+        
+        /* Red (Inverse) */
+        /* Streamlit switches the color based on the value, but we map 'red' to 'inverse' 
+           to ensure it handles semantically bad indicators. */
+        
+        /* Target gray/off deltas for 'standard' metrics */
+        [data-testid="stMetricDelta"] > div {
+             font-size: 0.9rem;
+        }
         
         /* --- Chat UI --- */
         [data-testid="stChatMessage"] {

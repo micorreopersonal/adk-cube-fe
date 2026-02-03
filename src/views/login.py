@@ -19,7 +19,7 @@ def render_login():
             col_logo_1, col_logo_2, col_logo_3 = st.columns([1, 2, 1])
             with col_logo_2:
                 if os.path.exists("src/images/logo.svg"):
-                    st.image("src/images/logo.svg", use_container_width=True)
+                    st.image("src/images/logo.svg", width="stretch")
             
             st.markdown("""
                 <div style='text-align: center; margin-bottom: 2rem;'>
@@ -35,7 +35,7 @@ def render_login():
                 password = st.text_input("Contraseña", type="password", placeholder="••••••")
                 
                 st.write("") # Spacer
-                submitted = st.form_submit_button("Ingresar", use_container_width=True)
+                submitted = st.form_submit_button("Ingresar", width="stretch")
                 
                 if submitted:
                     user = auth.login(username, password)
