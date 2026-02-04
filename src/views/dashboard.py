@@ -198,13 +198,25 @@ def render_dashboard():
     from src.components.visualizer import Visualizer
     
     for idx, msg in enumerate(st.session_state.messages):
-        with st.chat_message(msg["role"]):
-            # Soporte híbrido: Texto plano (Legacy) o Estructura Visual
-            content = msg["content"]
-            if isinstance(content, str):
-                st.markdown(content)
-            elif isinstance(content, list):
-                Visualizer.render(content, key_prefix=str(idx))
+        if msg["role"] == "user":
+            with st.chat_message("user"):
+                st.markdown(msg["content"])
+        else:  # Assistant
+            # --- EXTRACT AND DISPLAY SUMMARY FIRST (OUTSIDE CHAT BUBBLE) ---
+            if isinstance(msg["content"], list):
+                summary = msg.get("summary", "")
+                if summary:
+                    st.markdown(f"### 📊 {summary}")
+                    st.divider()
+            
+            with st.chat_message("assistant"):
+                # Si es lista (Visual Package), renderizamos con el motor
+                if isinstance(msg["content"], list):
+                    # Render visual blocks
+                    Visualizer.render(msg["content"], key_prefix=f"msg_{idx}")
+                else:
+                    # Mensaje de texto plano
+                    st.markdown(msg["content"])
 
     # --- INPUT DEL USUARIO ---
     # Placeholder genérico
@@ -297,7 +309,15 @@ def render_dashboard():
             
             # --- RENDERIZADO ---
             if is_visual:
-                st.session_state.messages.append({"role": "assistant", "content": content_payload})
+                # Extract summary from response_data
+                summary = response_data.get("summary", "")
+                
+                # Store summary WITH the message for proper historical rendering
+                st.session_state.messages.append({
+                    "role": "assistant", 
+                    "content": content_payload,
+                    "summary": summary  # Store summary alongside content
+                })
                 # No necesitamos renderizar aquí el componente visual complejo, 
                 # porque st.rerun() lo hará en el bucle principal de historial.
                 # Solo mostrar feedback inmediato si se desea, pero rerun es más limpio.

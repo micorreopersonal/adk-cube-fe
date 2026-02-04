@@ -4,6 +4,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 import uuid
 import traceback
+from typing import Union, Optional
 from src.schemas import VisualBlock, KPICard
 
 class Visualizer:
@@ -152,6 +153,42 @@ class Visualizer:
                 )
 
     @staticmethod
+    def format_metric_value(value: Union[float, int, None], fmt: Optional[dict] = None) -> str:
+        """
+        Format a metric value based on backend format metadata.
+        
+        Args:
+            value: The numeric value to format
+            fmt: Format dict with {unit_type, symbol, decimals}
+        
+        Returns:
+            Formatted string (e.g., "25.50%", "S/1,250.00", "462")
+        """
+        if value is None or (isinstance(value, float) and pd.isna(value)):
+            return ""
+        
+        # Default format (percentage with 2 decimals) for backward compatibility
+        if not fmt:
+            return f"{value:.2f}%"
+        
+        # Extract format properties
+        decimals = fmt.get("decimals", 2)
+        symbol = fmt.get("symbol")
+        unit_type = fmt.get("unit_type", "percentage")
+        
+        # Round to specified decimals
+        rounded = f"{value:.{decimals}f}"
+        
+        # Apply symbol based on unit_type
+        if symbol:
+            if unit_type == "percentage":
+                return f"{rounded}{symbol}"  # "25.50%"
+            else:  # currency or other prefix symbols
+                return f"{symbol}{rounded}"  # "S/1,250.00"
+        
+        return rounded  # "462" (count without symbol)
+    
+    @staticmethod
     def _render_chart_v2(payload: dict, subtype: str, metadata: dict, key_prefix: str):
         # Payload: { labels: [], datasets: [{label, data, ...}] }
         if hasattr(payload, "dict"): payload = payload.dict() # Handle Pydantic
@@ -203,13 +240,18 @@ class Visualizer:
                     ds_data = ds.get("data", [])
                     color = ds.get("color") or COLORS[idx % len(COLORS)]
                     
+                    # Extract format metadata from dataset
+                    ds_format = ds.get("format")
+                    if ds_format and hasattr(ds_format, "dict"):
+                        ds_format = ds_format.dict()
+                    
                     if chart_type_target == "BAR":
                         fig.add_trace(go.Bar(
                             x=filtered_labels,
                             y=ds_data,
                             name=ds_label,
                             marker_color=color,
-                            text=[f"{v:.1f}%" if isinstance(v, (int, float)) and v < 100 else v for v in ds_data],
+                            text=[Visualizer.format_metric_value(v, ds_format) for v in ds_data],
                             textposition="auto"
                         ))
                     else: # LINE
@@ -220,7 +262,7 @@ class Visualizer:
                             name=ds_label,
                             line=dict(color=color, width=3),
                             marker=dict(size=8),
-                            text=[f"{v:.1f}%" if isinstance(v, (int, float)) and v < 100 else v for v in ds_data],
+                            text=[Visualizer.format_metric_value(v, ds_format) for v in ds_data],
                             textposition="top center"
                         ))
 
@@ -234,7 +276,7 @@ class Visualizer:
                     showlegend=metadata.get("show_legend", True),
                     legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
                 )
-                st.plotly_chart(fig, use_container_width=True, key=f"{key_prefix}_{chart_type_target}_{data_hash}")
+                st.plotly_chart(fig, width="stretch", key=f"{key_prefix}_{chart_type_target}_{data_hash}")
 
         # --- TAB 3: Table ---
         with tabs[2]:
@@ -245,7 +287,7 @@ class Visualizer:
                 table_dict[ds_label] = ds.get("data", [])
             
             df_table = pd.DataFrame(table_dict)
-            st.dataframe(df_table, use_container_width=True, hide_index=True)
+            st.dataframe(df_table, width="stretch", hide_index=True)
             
             # Download Button
             csv = df_table.to_csv(index=False).encode('utf-8')
@@ -268,9 +310,97 @@ class Visualizer:
         if not headers or not rows:
             st.warning("⚠️ Tabla sin datos.")
             return
+        
+        # Create DataFrame
+        df_original = pd.DataFrame(rows, columns=headers)
+        df = df_original.copy()  # Working copy for filters
+        
+        # --- TITLE (from metadata or can be passed from summary) ---
+        title = metadata.get("title", "")
+        if title:
+            st.markdown(f"#### {title}")
+        
+        # --- FILTERS IN EXPANDER ---
+        with st.expander("🔍 **Filtros Avanzados**", expanded=False):
+            # Detect categorical columns (string types with reasonable unique values)
+            filter_cols = []
+            for col in headers:
+                unique_vals = df_original[col].dropna().unique()
+                if len(unique_vals) < 50 and df_original[col].dtype == 'object':
+                    filter_cols.append(col)
             
-        df = pd.DataFrame(rows, columns=headers)
-        st.dataframe(df, use_container_width=True, hide_index=True)
+            if filter_cols:
+                st.caption("Selecciona valores para filtrar. Deja vacío para ver todos.")
+                
+                # Create multiselect filters in columns (up to 3 per row for better layout)
+                cols_per_row = min(3, len(filter_cols))
+                
+                active_filters = {}
+                for row_idx in range(0, len(filter_cols), cols_per_row):
+                    filter_row = filter_cols[row_idx:row_idx + cols_per_row]
+                    cols = st.columns(len(filter_row))
+                    
+                    for idx, col_name in enumerate(filter_row):
+                        with cols[idx]:
+                            unique_values = sorted(df_original[col_name].dropna().unique().tolist())
+                            selected = st.multiselect(
+                                f"{col_name}",
+                                options=unique_values,
+                                default=[],  # EMPTY BY DEFAULT
+                                key=f"filter_{key_prefix}_{col_name}",
+                                placeholder="Todos"
+                            )
+                            if selected:  # Only apply if user selected something
+                                active_filters[col_name] = selected
+                
+                # Apply all active filters
+                for col_name, selected_values in active_filters.items():
+                    df = df[df[col_name].isin(selected_values)]
+            
+            # --- SEARCH BAR (Global text search) ---
+            st.markdown("---")
+            search_term = st.text_input(
+                "🔎 Búsqueda por texto:", 
+                key=f"search_{key_prefix}",
+                placeholder="Buscar en cualquier columna..."
+            )
+            
+            if search_term:
+                mask = df.astype(str).apply(
+                    lambda row: row.str.contains(search_term, case=False, na=False).any(), 
+                    axis=1
+                )
+                df = df[mask]
+        
+        # --- STATS ---
+        total_records = len(df_original)
+        filtered_records = len(df)
+        
+        if filtered_records < total_records:
+            st.info(f"📊 Mostrando **{filtered_records}** de **{total_records}** registros (filtrado activo)")
+        else:
+            st.caption(f"📊 **{total_records}** registros totales")
+        
+        # --- FORMAT NUMERIC COLUMNS TO 2 DECIMALS ---
+        # Apply formatting to numeric columns (likely rotation rates)
+        for col in df.columns:
+            if df[col].dtype in ['float64', 'float32']:
+                # Format to 2 decimals for display
+                df[col] = df[col].apply(lambda x: f"{x:.2f}" if pd.notna(x) else x)
+        
+        # --- RENDER TABLE ---
+        st.dataframe(df, width="stretch", hide_index=True, height=400)
+        
+        # --- DOWNLOAD BUTTON ---
+        csv = df.to_csv(index=False).encode('utf-8')
+        st.download_button(
+            label="📥 Descargar datos filtrados (CSV)",
+            data=csv,
+            file_name=f"{key_prefix}_export.csv",
+            mime='text/csv',
+            key=f"dl_table_{key_prefix}",
+            use_container_width=True
+        )
 
     @staticmethod
     def _detect_x_axis(data: dict) -> str:
@@ -792,6 +922,43 @@ class Visualizer:
         except Exception as e:
             st.error(f"Error renderizando gráfico mejorado: {e}")
 
+    # --- HELPER: Dynamic Metric Formatting ---
+    @staticmethod
+    def format_metric_value(value: Union[float, int, None], fmt: Optional[dict] = None) -> str:
+        """
+        Format a metric value based on backend format metadata.
+        
+        Args:
+            value: The numeric value to format
+            fmt: Format dict with {unit_type, symbol, decimals}
+        
+        Returns:
+            Formatted string (e.g., "25.50%", "S/1,250.00", "462")
+        """
+        if value is None or (isinstance(value, float) and pd.isna(value)):
+            return ""
+        
+        # Default format (percentage with 2 decimals) for backward compatibility
+        if not fmt:
+            return f"{value:.2f}%"
+        
+        # Extract format properties
+        decimals = fmt.get("decimals", 2)
+        symbol = fmt.get("symbol")
+        unit_type = fmt.get("unit_type", "percentage")
+        
+        # Round to specified decimals
+        rounded = f"{value:.{decimals}f}"
+        
+        # Apply symbol based on unit_type
+        if symbol:
+            if unit_type == "percentage":
+                return f"{rounded}{symbol}"  # "25.50%"
+            else:  # currency or other prefix symbols
+                return f"{symbol}{rounded}"  # "S/1,250.00"
+        
+        return rounded  # "462" (count without symbol)
+    
     @staticmethod
     def _render_table(data: list, key_prefix: str = ""):
         if data:

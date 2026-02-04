@@ -19,11 +19,18 @@ class IndicatorInternal(BaseModel):
     tooltip: Optional[str] = None
     is_percentage: Optional[bool] = False
 
+class MetricFormat(BaseModel):
+    """Format metadata for metrics (from backend registry)"""
+    unit_type: str  # "count" | "percentage" | "currency"
+    symbol: Optional[str] = None  # None, "%", "S/", "$"
+    decimals: int = 2  # Precision
+
 class Dataset(BaseModel):
     label: str
     data: List[Union[float, int, None]]
     type: Optional[str] = None # 'line', 'bar' override
     color: Optional[str] = None
+    format: Optional[MetricFormat] = None  # ✨ NEW: Dynamic formatting
 
 class ChartPayload(BaseModel):
     labels: List[str]
