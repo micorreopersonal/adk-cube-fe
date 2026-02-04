@@ -44,6 +44,9 @@ class ApiClient:
             "context_profile": user.role 
         }
         
+        # --- TELEMETRY: Capture Request Context (Context Copier) ---
+        st.session_state.last_request_payload = payload
+        
         headers = {
             "Authorization": f"Bearer {user.token}", 
             "Content-Type": "application/json"

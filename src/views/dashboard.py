@@ -4,7 +4,9 @@ import streamlit as st
 import os
 from src.state import get_user, logout
 from src.security.auth import AuthService
+
 from src.services.api_client import ApiClient
+from src.components.sidebar import render_sidebar
 
 def render_dashboard():
     user = get_user()
@@ -12,61 +14,7 @@ def render_dashboard():
     api_client = ApiClient() 
     
     # --- Sidebar ---
-    with st.sidebar:
-        # BRANDING: Centrado
-        st.markdown("<div style='text-align: center;'>", unsafe_allow_html=True)
-        if os.path.exists("src/images/logo.svg"):
-            st.image("src/images/logo.svg", width=160)
-        elif os.path.exists("src/images/rimac.png"):
-             st.image("src/images/rimac.png", width=140)
-        else:
-            st.markdown("## 🛡️ RIMAC Seguros")
-            
-        st.markdown("<p style='color: #718096; font-size: 0.9rem; margin-top: -10px;'>People Analytics & AI</p>", unsafe_allow_html=True)
-        st.markdown("</div>", unsafe_allow_html=True)
-        
-        st.divider()
-        
-        # PERFIL DE USUARIO: Diseño en Card Centrado
-        with st.container(border=True):
-            # Usar columnas para centrar el contenido del perfil
-            c_space1, c_content, c_space2 = st.columns([1, 8, 1])
-            with c_content:
-                st.markdown("<div style='text-align: center;'>", unsafe_allow_html=True)
-                st.markdown("### 👤")
-                st.markdown(f"**{user.name}**")
-                st.markdown(f"<span style='background-color:#F5F5F5; padding: 2px 8px; border-radius: 4px; font-size: 12px; color: #666;'>{user.role.upper()}</span>", unsafe_allow_html=True)
-                st.markdown("</div>", unsafe_allow_html=True)
-
-        st.markdown("<br>", unsafe_allow_html=True) # Espaciador
-        
-        # Estilo para el botón de Cerrar Sesión (con borde)
-        st.markdown("""
-            <style>
-            section[data-testid="stSidebar"] div.stButton > button {
-                border: 1px solid #d1d5db !important;
-                border-radius: 8px !important;
-                transition: all 0.3s ease;
-            }
-            section[data-testid="stSidebar"] div.stButton > button:hover {
-                border-color: #ef4444 !important;
-                color: #ef4444 !important;
-                background-color: #fef2f2 !important;
-            }
-            </style>
-        """, unsafe_allow_html=True)
-
-        if st.button("🔒 Cerrar Sesión", width="stretch", type="secondary"):
-            logout()
-            st.rerun()
-
-        # ESPACIO FINAL Y CONFIG (Solo en Desarrollo)
-        from src.config import SHOW_DEBUG_UI
-        if SHOW_DEBUG_UI:
-            st.divider()
-            with st.expander("⚙️ Configuración", expanded=False):
-                 show_debug = st.toggle("Modo Debug", value=st.session_state.get("show_debug", False))
-                 st.session_state["show_debug"] = show_debug
+    render_sidebar()
 
     # --- UI Principal ---
     # Títulos neutrales para producción
@@ -86,7 +34,7 @@ def render_dashboard():
         # Alineación y botón de reset
         st.write("") 
         st.write("")
-        if st.button("🗑️ Reiniciar", help="Borrar memoria del agente y limpiar chat", width="stretch"):
+        if st.button("🗑️ Reiniciar", help="Borrar memoria del agente y limpiar chat", use_container_width=True):
              if api_client.reset_session(user):
                  st.session_state.messages = []
                  st.session_state.last_api_response = None # Limpiar también el último debug
@@ -110,21 +58,32 @@ def render_dashboard():
                      st.session_state.messages.append({"role": "user", "content": "Analiza la rotación voluntaria del año 2024 y 2025 comparada por divisiones."})
                      st.rerun()
 
+        # RBAC Check
+        is_privileged = user.role in ['admin', 'hr_bp']
+
         with c2:
             with st.container(border=True):
                 st.markdown("### ⭐ Talento Clave")
                 st.caption("Identifica a tus HiPos y Riesgos.")
-                if st.button("Ver Top Talent ➔", key="btn_talento"):
-                     st.session_state.messages.append({"role": "user", "content": "Muestra las fugas de talento clave (Hiper/Hipo) registradas en el último mes cerrado."})
-                     st.rerun()
+                
+                if is_privileged:
+                    if st.button("Ver Top Talent ➔", key="btn_talento"):
+                         st.session_state.messages.append({"role": "user", "content": "Muestra las fugas de talento clave (Hiper/Hipo) registradas en el último mes cerrado."})
+                         st.rerun()
+                else:
+                    st.button("🔒 Top Talent", key="btn_talento_disabled", disabled=True, help="Requiere rol HR_BP o ADMIN")
 
         with c3:
             with st.container(border=True):
                 st.markdown("### 🚨 Alertas Activas")
                 st.caption("Focos rojos que requieren atención.")
-                if st.button("Ver Alertas ➔", key="btn_alertas"):
-                     st.session_state.messages.append({"role": "user", "content": "¿Qué divisiones (UO2) tienen la mayor tasa de renuncia acumulada en el año 2025?"})
-                     st.rerun()
+                
+                if is_privileged:
+                    if st.button("Ver Alertas ➔", key="btn_alertas"):
+                         st.session_state.messages.append({"role": "user", "content": "¿Qué divisiones (UO2) tienen la mayor tasa de renuncia acumulada en el año 2025?"})
+                         st.rerun()
+                else:
+                    st.button("🔒 Alertas", key="btn_alertas_disabled", disabled=True, help="Requiere rol HR_BP o ADMIN")
         
         # --- SUGGESTIONS / BRAINSTORMING BLOCK ---
         st.divider()
@@ -162,28 +121,28 @@ def render_dashboard():
         with s_col1:
             st.markdown("**📊 Tendencias y Evolución**")
             # Usar espacios NO rompibles para separar el bullet
-            if st.button("•  Curva de rotación mensual 2025", width="stretch"):
+            if st.button("•  Curva de rotación mensual 2025", use_container_width=True):
                 st.session_state.messages.append({"role": "user", "content": "Muestra la tendencia mensual de rotación voluntaria e involuntaria del 2025 a nivel de toda la empresa."})
                 st.rerun()
-            if st.button("•  Comparativo 2024 vs 2025", width="stretch"):
+            if st.button("•  Comparativo 2024 vs 2025", use_container_width=True):
                 st.session_state.messages.append({"role": "user", "content": "Genera un gráfico comparativo de la rotación acumulada entre el año 2024 y 2025."})
                 st.rerun()
 
         with s_col2:
             st.markdown("**🔍 Focos y Segmentos**")
-            if st.button("•  Ranking de Divisiones (UO2)", width="stretch"):
+            if st.button("•  Ranking de Divisiones (UO2)", use_container_width=True):
                  st.session_state.messages.append({"role": "user", "content": "¿Cuáles son las 5 divisiones (UO2) con mayor cantidad de renuncias en lo que va del año?"})
                  st.rerun()
-            if st.button("•  FFVV vs Administrativos", width="stretch"):
+            if st.button("•  FFVV vs Administrativos", use_container_width=True):
                  st.session_state.messages.append({"role": "user", "content": "Compara la tasa de rotación entre el segmento Fuerza de Ventas y Administrativos para el año 2025."})
                  st.rerun()
 
         with s_col3:
             st.markdown("**🧠 Insights Profundos**")
-            if st.button("•  Motivos de Salida", width="stretch"):
+            if st.button("•  Motivos de Salida", use_container_width=True):
                  st.session_state.messages.append({"role": "user", "content": "¿Cuáles son los principales motivos de renuncia registrados en el último trimestre de 2025 a nivel de toda la empresa?"})
                  st.rerun()
-            if st.button("•  Listado de Bajas Recientes", width="stretch"):
+            if st.button("•  Listado de Bajas Recientes", use_container_width=True):
                  st.session_state.messages.append({"role": "user", "content": "Dame un listado detallado de las personas que cesaron el último mes cerrado del año 2025 a nivel de toda la empresa."})
                  st.rerun()
     
@@ -244,10 +203,16 @@ def render_dashboard():
         # - Si vino de botón + rerun, ya se renderizó en el bucle de historial al principio.
         # Esto soluciona el bug de duplicidad.
 
-        # 2. LLAMADA AL BACKEND REAL
-        with st.spinner("Procesando consulta..."):
+        # 2. LLAMADA AL BACKEND REAL (Async UI Pattern)
+        with st.status("🧠 **Analizando...**", expanded=True) as status:
+            st.write("📡 Conectando con Nexus AI...")
             # El backend recibirá el rol del usuario y decidirá qué tools usar internamente
             response_data = api_client.send_chat(prompt_content, user)
+            
+            if response_data:
+                status.update(label="✅ **Respuesta Recibida**", state="complete", expanded=False)
+            else:
+                status.update(label="❌ **Error de Conexión**", state="error", expanded=False)
 
         # 3. Mostrar respuesta AI
         if response_data:
@@ -367,5 +332,15 @@ def render_dashboard():
                 # Raw JSON
                 st.write("📄 **Raw JSON Response:**")
                 st.json(res)
+                
+                # --- Context Copier ---
+                st.divider()
+                st.write("📤 **Contexto Enviado (Payload):**")
+                st.caption("Copia esto para reproducir errores en Postman o Pytest.")
+                import json
+                if "last_request_payload" in st.session_state:
+                    st.code(json.dumps(st.session_state.last_request_payload, indent=2), language="json")
+                else:
+                    st.info("No hay contexto previo capturado.")
             else:
                 st.info("Esperando la primera consulta para mostrar datos de debug.")

@@ -2,17 +2,28 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
-import uuid
-import traceback
-from typing import Union, Optional
+from typing import Union, Optional, List, Dict, Any
 from src.schemas import VisualBlock, KPICard
+from src.utils.chart_styles import ChartColors, ChartLayouts
 
 class Visualizer:
+    """
+    Central component for rendering all visual elements in the application.
+    
+    Responsibilities:
+    1. Orchestration: Iterates through visual blocks and dispatches to specific renderers.
+    2. Fault Tolerance: Encapsulates rendering logic in try-except blocks to prevent UI crashes.
+    3. Consistency: Applies standardized styles (ChartLayouts, ChartColors) across all visuals.
+    4. Interactivity: Manages filtering, searching, and downloads for data components.
+    """
     @staticmethod
-    def render(content: list, key_prefix: str = ""):
+    def render(content: List[Dict[str, Any]], key_prefix: str = ""):
         """
-        BlockOrchestrator: Renders a list of visual blocks with Error Boundaries.
-        Uses Pydantic validation (Contract Layer) to ensure data integrity.
+        Main entry point. Renders a list of visual blocks with Error Boundaries.
+        
+        Args:
+            content: List of visual blocks (dictionaries or Pydantic models).
+            key_prefix: Unique string to namespace widgets and keys.
         """
         if not content:
             return
@@ -49,7 +60,11 @@ class Visualizer:
     @staticmethod
     def _render_block(block: VisualBlock, block_key: str):
         """
-        Dispatches the block to the correct renderer based on type.
+        Dispatches the visual block to the appropriate internal renderer.
+        
+        Args:
+            block: The VisualBlock Pydantic model containing type, payload, and metadata.
+            block_key: Unique identifier for widget state stability.
         """
         b_type = block.type
         payload = block.payload
@@ -60,7 +75,7 @@ class Visualizer:
                 
         # --- V2: Semantic Cube Contract ---
         elif b_type == "KPI_ROW":
-            # Payload is List[IndicatorInternal] or similar list of dicts
+            # Payload is List[IndicatorInternal]
             Visualizer._render_kpis_v2(payload)
 
         elif b_type == "CHART":
@@ -98,6 +113,27 @@ class Visualizer:
              if isinstance(payload, dict):
                 Visualizer._render_talent_matrix(payload, key_prefix=block_key)
         
+        elif b_type == "churn_alert":
+             # Alias for Critical Insight
+             st.error(f"⚠️ {payload.get('value', 'Riesgo Detectado')}", icon="🔥")
+             
+        elif b_type == "metric_delta":
+             # Single Metric Rendering
+             st.metric(
+                label=payload.get("label", "Métrica"),
+                value=payload.get("value"),
+                delta=payload.get("delta"),
+                delta_color=payload.get("delta_color", "normal")
+             )
+        
+        elif b_type == "plotly_chart":
+             # Render Plotly JSON directly
+             try:
+                 fig = go.Figure(payload)
+                 st.plotly_chart(fig, use_container_width=True, key=block_key)
+             except Exception as e:
+                 st.error(f"Error renderizando Plotly: {e}")
+
         else:
              pass
 
@@ -189,7 +225,45 @@ class Visualizer:
         return rounded  # "462" (count without symbol)
     
     @staticmethod
-    def _render_chart_v2(payload: dict, subtype: str, metadata: dict, key_prefix: str):
+    def _aggregate_small_slices(labels: list, values: list, threshold_percent: float = 0.02) -> tuple:
+        """
+        Aggregates values smaller than a threshold into an "Others" category.
+        """
+        if not values or sum(values) == 0:
+            return labels, values
+
+        total = sum(values)
+        new_labels = []
+        new_values = []
+        other_sum = 0
+        
+        for i, val in enumerate(values):
+            # Check if val is None (dirty data)
+            if val is None: val = 0
+            
+            if val / total >= threshold_percent:
+                new_labels.append(labels[i])
+                new_values.append(val)
+            else:
+                other_sum += val
+                
+        if other_sum > 0:
+            new_labels.append("Otros (Menor Impacto)")
+            new_values.append(other_sum)
+            
+        return new_labels, new_values
+
+    @staticmethod
+    def _render_chart_v2(payload: Dict[str, Any], subtype: str, metadata: Dict[str, Any], key_prefix: str):
+        """
+        Renders standardized charts (Pie, Line, Bar) based on the V2 Payload Schema.
+        
+        Args:
+            payload: Dict containing 'labels' (List[str]) and 'datasets' (List[Dict]).
+            subtype: 'PIE', 'LINE', or 'BAR'.
+            metadata: Configuration for titles, legends, etc.
+            key_prefix: Unique key namespace.
+        """
         # Payload: { labels: [], datasets: [{label, data, ...}] }
         if hasattr(payload, "dict"): payload = payload.dict() # Handle Pydantic
         
@@ -200,7 +274,7 @@ class Visualizer:
             st.warning("⚠️ Gráfico sin datos.")
             return
 
-        # --- Filtering Logic ---
+        # --- FILTERING LOGIC ---
         import hashlib
         data_hash = hashlib.md5(str(payload).encode()).hexdigest()[:8]
         
@@ -224,62 +298,104 @@ class Visualizer:
             new_ds["data"] = [ds["data"][i] for i in indices]
             filtered_datasets.append(new_ds)
 
-        # Restore Tabs: Line, Bar, Table
-        tab_list = ["📈 Línea", "📊 Barras", "📋 Tabla"]
-        tabs = st.tabs(tab_list)
-        
-        # Colors
-        COLORS = ['#EF3340', '#3949AB', '#00897B', '#FB8C00', '#757575', '#8E24AA']
-        
-        # --- TAB 1 & 2: Charts ---
-        for tab_idx, chart_type_target in enumerate(["LINE", "BAR"]):
-            with tabs[tab_idx]:
-                fig = go.Figure()
-                for idx, ds in enumerate(filtered_datasets):
-                    ds_label = ds.get("label", f"Serie {idx+1}")
-                    ds_data = ds.get("data", [])
-                    color = ds.get("color") or COLORS[idx % len(COLORS)]
+        # --- BRANCHING BY SUBTYPE ---
+        if subtype and subtype.upper() == "PIE":
+            # --- PIE CHART MODE ---
+            tab_list = ["🥧 Gráfico de Torta", "📋 Tabla"]
+            tabs = st.tabs(tab_list)
+            
+            with tabs[0]:
+                # Assuming first dataset for Pie
+                if not filtered_datasets:
+                    st.info("No data for Pie Chart")
+                else:
+                    ds = filtered_datasets[0] # Pie charts typically visualize one series
                     
-                    # Extract format metadata from dataset
-                    ds_format = ds.get("format")
-                    if ds_format and hasattr(ds_format, "dict"):
-                        ds_format = ds_format.dict()
+                    # --- SMART GROUPING (LONG TAIL) ---
+                    # Group values < 2% into "Otros" to avoid visual clutter
+                    final_labels, final_values = Visualizer._aggregate_small_slices(filtered_labels, ds["data"])
                     
-                    if chart_type_target == "BAR":
-                        fig.add_trace(go.Bar(
-                            x=filtered_labels,
-                            y=ds_data,
-                            name=ds_label,
-                            marker_color=color,
-                            text=[Visualizer.format_metric_value(v, ds_format) for v in ds_data],
-                            textposition="auto"
-                        ))
-                    else: # LINE
-                        fig.add_trace(go.Scatter(
-                            x=filtered_labels,
-                            y=ds_data,
-                            mode='lines+markers+text',
-                            name=ds_label,
-                            line=dict(color=color, width=3),
-                            marker=dict(size=8),
-                            text=[Visualizer.format_metric_value(v, ds_format) for v in ds_data],
-                            textposition="top center"
-                        ))
+                    # Colores RIMAC (Dynamic)
+                    colors = ChartColors.get_colors()
+                    
+                    fig = go.Figure(data=[go.Pie(
+                        labels=final_labels, 
+                        values=final_values,
+                        hole=0.4, # Donut style by default as it looks more modern
+                        marker=dict(colors=colors),
+                        textinfo='label+percent',
+                        hovertemplate="<b>%{label}</b><br>Valor: %{value}<br>Porcentaje: %{percent}<extra></extra>"
+                    )])
+                    
+                    # Apply Standard Layout
+                    layout = ChartLayouts.get_pie_layout(
+                        title=metadata.get("title", ""),
+                        show_legend=metadata.get("show_legend", True)
+                    )
+                    fig.update_layout(layout)
 
-                fig.update_layout(
-                    title=metadata.get("title", ""),
-                    xaxis_title="Dimension",
-                    yaxis_title=metadata.get("y_axis_label", "Valor"),
-                    template="plotly_white",
-                    height=500,
-                    hovermode="x unified",
-                    showlegend=metadata.get("show_legend", True),
-                    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
-                )
-                st.plotly_chart(fig, width="stretch", key=f"{key_prefix}_{chart_type_target}_{data_hash}")
+                    st.plotly_chart(fig, use_container_width=True, key=f"{key_prefix}_pie_{data_hash}")
+                    
+        else:
+            # --- DEFAULT MODE (LINE/BAR) ---
+            tab_list = ["📈 Línea", "📊 Barras", "📋 Tabla"]
+            tabs = st.tabs(tab_list)
+            
+            # Colors
+            # Colors
+            COLORS = ChartColors.get_colors()
+            
+            # --- TAB 1 & 2: Charts ---
+            for tab_idx, chart_type_target in enumerate(["LINE", "BAR"]):
+                with tabs[tab_idx]:
+                    fig = go.Figure()
+                    for idx, ds in enumerate(filtered_datasets):
+                        ds_label = ds.get("label", f"Serie {idx+1}")
+                        ds_data = ds.get("data", [])
+                        color = ds.get("color") or COLORS[idx % len(COLORS)]
+                        
+                        # Extract format metadata from dataset
+                        ds_format = ds.get("format")
+                        if ds_format and hasattr(ds_format, "dict"):
+                            ds_format = ds_format.dict()
+                        
+                        if chart_type_target == "BAR":
+                            fig.add_trace(go.Bar(
+                                x=filtered_labels,
+                                y=ds_data,
+                                name=ds_label,
+                                marker_color=color,
+                                text=[Visualizer.format_metric_value(v, ds_format) for v in ds_data],
+                                textposition="auto"
+                            ))
+                        else: # LINE
+                            fig.add_trace(go.Scatter(
+                                x=filtered_labels,
+                                y=ds_data,
+                                mode='lines+markers+text',
+                                name=ds_label,
+                                line=dict(color=color, width=3),
+                                marker=dict(size=8),
+                                text=[Visualizer.format_metric_value(v, ds_format) for v in ds_data],
+                                textposition="top center"
+                            ))
 
-        # --- TAB 3: Table ---
-        with tabs[2]:
+                    
+                    # Apply Standard Cartesian Layout
+                    layout = ChartLayouts.get_cartesian_layout(
+                        title=metadata.get("title", ""),
+                        x_label="Dimension",
+                        y_label=metadata.get("y_axis_label", "Valor"),
+                        show_legend=metadata.get("show_legend", True)
+                    )
+                    fig.update_layout(layout)
+                    st.plotly_chart(fig, use_container_width=True, key=f"{key_prefix}_{chart_type_target}_{data_hash}")
+
+        # --- TABLE TAB (Shared Logic) ---
+        # The table tab index depends on the mode
+        table_tab_index = 1 if (subtype and subtype.upper() == "PIE") else 2
+        
+        with tabs[table_tab_index]:
             # Reconstruct Table from Labes + Datasets (Filtered)
             table_dict = {"Eje": filtered_labels}
             for ds in filtered_datasets:
@@ -287,7 +403,7 @@ class Visualizer:
                 table_dict[ds_label] = ds.get("data", [])
             
             df_table = pd.DataFrame(table_dict)
-            st.dataframe(df_table, width="stretch", hide_index=True)
+            st.dataframe(df_table, use_container_width=True, hide_index=True)
             
             # Download Button
             csv = df_table.to_csv(index=False).encode('utf-8')
@@ -300,7 +416,15 @@ class Visualizer:
             )
 
     @staticmethod
-    def _render_table_v2(payload: dict, metadata: dict, key_prefix: str):
+    def _render_table_v2(payload: Dict[str, Any], metadata: Dict[str, Any], key_prefix: str):
+        """
+        Renders a rich interactive table with client-side filtering and search.
+        
+        Args:
+            payload: Dict containing 'headers' (List[str]) and 'rows' (List[List]).
+            metadata: Configuration for title and column formats.
+            key_prefix: Unique namespace.
+        """
         # Payload: { headers: [], rows: [] }
         if hasattr(payload, "dict"): payload = payload.dict()
         
@@ -389,7 +513,7 @@ class Visualizer:
                 df[col] = df[col].apply(lambda x: f"{x:.2f}" if pd.notna(x) else x)
         
         # --- RENDER TABLE ---
-        st.dataframe(df, width="stretch", hide_index=True, height=400)
+        st.dataframe(df, use_container_width=True, hide_index=True, height=400)
         
         # --- DOWNLOAD BUTTON ---
         csv = df.to_csv(index=False).encode('utf-8')
@@ -403,7 +527,7 @@ class Visualizer:
         )
 
     @staticmethod
-    def _detect_x_axis(data: dict) -> str:
+    def _detect_x_axis(data: Dict[str, Any]) -> Optional[str]:
         """Helper to find the likely x-axis key."""
         # Priority 1: 'months' for backward compatibility
         if 'months' in data: return 'months'
@@ -417,7 +541,7 @@ class Visualizer:
         return None
 
     @staticmethod
-    def _get_plotting_keys(data: dict, x_key: str, metadata: dict) -> list:
+    def _get_plotting_keys(data: Dict[str, Any], x_key: str, metadata: Optional[Dict[str, Any]] = None) -> List[str]:
         """Determines which series to plot based on strict metadata or heuristics."""
         if metadata and metadata.get("series_names"):
             return list(metadata.get("series_names").keys())
@@ -425,7 +549,22 @@ class Visualizer:
         return [k for k in data.keys() if k not in [x_key, 'headcount', 'ceses', 'renuncias', 'involuntarios', 'anio', 'year', 'periodo']]
 
     @staticmethod
-    def _create_line_chart(data, metadata):
+    def _create_line_chart(data: Dict[str, Any], metadata: Dict[str, Any]) -> go.Figure:
+        """
+        Generates a Plotly Line Chart from normalized data.
+        
+        Features:
+        - Supports multiple series per X-axis.
+        - Handles grouping (grouped lines by category).
+        - Applies semantic styling (e.g., dotted lines for 'voluntary' turnover).
+        
+        Args:
+            data: Standardized data dictionary.
+            metadata: Chart configuration (titles, labels).
+            
+        Returns:
+            go.Figure: The configured Plotly figure.
+        """
         fig = go.Figure()
         x_key = Visualizer._detect_x_axis(data) or 'months'
         x_values = data.get(x_key, [])
@@ -445,7 +584,7 @@ class Visualizer:
                  group_col = candidates[0] # Take first candidate like 'anio'
 
         # Paleta de colores RIMAC y complementarios
-        COLORS = ['#EF3340', '#3949AB', '#00897B', '#FB8C00', '#757575', '#8E24AA']
+        COLORS = ChartColors.get_colors()
         
         if group_col:
             # --- Grouped Line Chart ---
@@ -504,19 +643,27 @@ class Visualizer:
                     hovertemplate=f"<b>{series_name}</b><br>{x_key.capitalize()}: %{{x}}<br>Valor: %{{y}}%<extra></extra>"
                 ))
 
-        fig.update_layout(
+        layout = ChartLayouts.get_cartesian_layout(
             title=metadata.get('title', f"Dinámica {metadata.get('year', '')}"),
-            xaxis_title=x_key.capitalize(),
-            yaxis_title=metadata.get('y_label', "Valor"),
-            hovermode='x unified',
-            template='plotly_white',
-            height=500,
-            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+            x_label=x_key.capitalize(),
+            y_label=metadata.get('y_label', "Valor"),
+            show_legend=True
         )
+        fig.update_layout(layout)
         return fig
 
     @staticmethod
-    def _create_bar_chart(data, metadata):
+    def _create_bar_chart(data: Dict[str, Any], metadata: Dict[str, Any]) -> go.Figure:
+        """
+        Generates a Plotly Bar Chart (Grouped or Stacked).
+        
+        Args:
+            data: Standardized data dictionary.
+            metadata: Chart configuration.
+            
+        Returns:
+            go.Figure: The configured Plotly figure.
+        """
         fig = go.Figure()
         x_key = Visualizer._detect_x_axis(data) or 'months'
         x_values = data.get(x_key, [])
@@ -530,7 +677,7 @@ class Visualizer:
             candidates = [k for k in data.keys() if k != x_key and k not in keys]
             if candidates: group_col = candidates[0]
 
-        COLORS = ['#EF3340', '#3949AB', '#00897B', '#FB8C00', '#757575', '#8E24AA']
+        COLORS = ChartColors.get_colors()
         
         if group_col:
             # --- Grouped Bar Chart ---
@@ -581,18 +728,18 @@ class Visualizer:
                     hovertemplate=f"<b>{series_name}</b><br>{x_key.capitalize()}: %{{x}}<br>Valor: %{{y}}%<extra></extra>"
                 ))
 
-        fig.update_layout(
+        layout = ChartLayouts.get_cartesian_layout(
             title=metadata.get('title', f"Comparativa {metadata.get('year', '')}"),
-            xaxis_title=x_key.capitalize(),
-            yaxis_title=metadata.get('y_label', "Valor"),
-            barmode='group',
-            template='plotly_white',
-            height=500
+            x_label=x_key.capitalize(),
+            y_label=metadata.get('y_label', "Valor"),
+            show_legend=True
         )
+        layout['barmode'] = 'group' # Specific to Bar Charts
+        fig.update_layout(layout)
         return fig
 
     @staticmethod
-    def get_figures_from_content(content: list) -> list:
+    def get_figures_from_content(content: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """
         Extrae figuras de bloques visuales para su uso en reportes (PDF).
         """
@@ -669,9 +816,10 @@ class Visualizer:
         return normalized
 
     @staticmethod
-    def _render_interactive_series(data: dict, metadata: dict, key_prefix: str = ""):
+    def _render_interactive_series(data: Dict[str, Any], metadata: Dict[str, Any], key_prefix: str = ""):
         """
-        Renders an interactive visualization with tabs (agnostic X-axis).
+        Renders a multi-tab view (Line, Bar, Table) for a dataset.
+        Includes automatic X-axis detection and dynamic filtering.
         """
         if not data:
             return
@@ -734,11 +882,11 @@ class Visualizer:
         
         with tab1:
             fig = Visualizer._create_line_chart(filtered_data, metadata)
-            st.plotly_chart(fig, width='stretch', key=f"line_{data_hash}_{key_prefix}")
+            st.plotly_chart(fig, use_container_width=True, key=f"line_{data_hash}_{key_prefix}")
         
         with tab2:
             fig = Visualizer._create_bar_chart(filtered_data, metadata)
-            st.plotly_chart(fig, width='stretch', key=f"bar_{data_hash}_{key_prefix}")
+            st.plotly_chart(fig, use_container_width=True, key=f"bar_{data_hash}_{key_prefix}")
         
         with tab3:
             # Construcción dinámica del DataFrame para la tabla
@@ -761,7 +909,7 @@ class Visualizer:
                 key=f"dl_series_{data_hash}_{key_prefix}"
             )
             
-            st.dataframe(df_table, width='stretch', hide_index=True)
+            st.dataframe(df_table, use_container_width=True, hide_index=True)
             st.caption(f"Mostrando {len(df_table)} elementos seleccionados.")
 
     @staticmethod
@@ -799,7 +947,11 @@ class Visualizer:
                 )
 
     @staticmethod
-    def _render_plot_block(payload: dict, metadata: dict = None, key_prefix: str = ""):
+    def _render_plot_block(payload: Dict[str, Any], metadata: Optional[Dict[str, Any]] = None, key_prefix: str = ""):
+        """
+        Legacy/Simplified renderer for direct plot payloads.
+        Supports automatic chart switching (Bar/Line/Pie/Area).
+        """
         subtype = payload.get("subtype", "bar")
         data = payload.get("data", {})
         title = payload.get("title", "")
@@ -865,7 +1017,8 @@ class Visualizer:
                     color="category" if "category" in df.columns else None,
                     text_auto=True,
                     labels=labels_map,
-                    hover_data=hover_data
+                    hover_data=hover_data,
+                    color_discrete_sequence=ChartColors.get_colors()
                 )
             elif chart_type == "Línea":
                 fig = px.line(
@@ -873,7 +1026,8 @@ class Visualizer:
                     markers=True,
                     text="y",
                     labels=labels_map,
-                    hover_data=hover_data
+                    hover_data=hover_data,
+                    color_discrete_sequence=ChartColors.get_colors()
                 )
                 fig.update_traces(textposition="top center")
             elif chart_type == "Pie":
@@ -881,7 +1035,8 @@ class Visualizer:
                     df, names="x", values="y",
                     title=f"Distribución - {title}",
                     hover_data=hover_data,
-                    labels=labels_map
+                    labels=labels_map,
+                    color_discrete_sequence=ChartColors.get_colors()
                 )
                 fig.update_traces(textposition='inside', textinfo='percent+label')
             elif chart_type == "Area":
@@ -889,7 +1044,8 @@ class Visualizer:
                     df, x="x", y="y",
                     markers=True,
                     labels=labels_map,
-                    hover_data=hover_data
+                    hover_data=hover_data,
+                    color_discrete_sequence=ChartColors.get_colors()
                 )
             
             # Common Layout Updates
@@ -917,7 +1073,7 @@ class Visualizer:
                                       f"{y_label}: %{{y}}<br><extra></extra>"
                     )
 
-                st.plotly_chart(fig, width='stretch', key=f"plot_{data_hash}_{key_prefix}")
+                st.plotly_chart(fig, use_container_width=True, key=f"plot_{data_hash}_{key_prefix}")
 
         except Exception as e:
             st.error(f"Error renderizando gráfico mejorado: {e}")
@@ -1106,10 +1262,8 @@ class Visualizer:
             x=labels_perf,
             y=labels_pot,
             colorscale=[
-                [0, "#F8F9FA"],    # Light Grey (Empty)
-                [0.1, "#FFEBEE"],  # Very light red
-                [0.5, "#EF9A9A"],  # Mid red
-                [1.0, "#EF3340"]   # RIMAC RED (Full)
+                [0, "#F8F9FA"],          # Empty
+                [1.0, ChartColors.get_colors()[0]] # Primary Color (Dynamic)
             ],
             showscale=False,
             hovertemplate="Desempeño: %{x}<br>Potencial: %{y}<br>Colaboradores: %{z}<extra></extra>"
