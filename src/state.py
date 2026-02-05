@@ -21,13 +21,7 @@ def init_session():
     if "messages" not in st.session_state:
         st.session_state.messages = st.session_state.chat_history 
 
-    # 3. Contexto Activo (Filtros Globales)
-    if "active_context" not in st.session_state:
-        st.session_state.active_context = {
-            "segment_filter": "Global (Todos)",
-            "year_filter": "2025",
-            "view_mode": "executive"
-        }
+
 
     # 4. Telemetría y Debugging
     if "last_request_payload" not in st.session_state:
@@ -46,11 +40,7 @@ def get_user() -> Optional[UserProfile]:
 def set_user(user: UserProfile):
     st.session_state.user = user
 
-def get_context() -> Dict[str, Any]:
-    return st.session_state.active_context
 
-def update_context(key: str, value: Any):
-    st.session_state.active_context[key] = value
 
 def logout():
     st.session_state.clear() # Limpieza total para seguridad

@@ -24,31 +24,8 @@ def render_sidebar():
              st.session_state.show_debugger = st.toggle("Modo Debugger", value=st.session_state.get("show_debugger", True))
              st.divider()
 
-        # --- FILTROS DE SEGMENTO (Global Context) ---
-        st.subheader("🎯 Filtros de Talento")
-        
-        # Binding directo al Atomic State "active_context"
-        if "active_context" not in st.session_state:
-             from src.state import init_session
-             init_session()
-             
-        current_context = st.session_state.active_context
-        
-        filtro_talento = st.radio(
-            "Foco de Análisis:",
-            ["Global (Todos)", "Talento (Score 7-9)", "Hipos (Score 8-9)"],
-            index=0,
-            key="segment_filter_widget", # Widget key distinct from state key to avoid collisions if we were syncing manually, but here we just read/write
-            help="Filtra los insights para centrarse en los grupos de talento crítico."
-        )
-        
-        # Update Atomic Context
-        current_context["segment_filter"] = filtro_talento
-        
-        if filtro_talento != "Global (Todos)":
-            st.info(f"Focalizando en: **{filtro_talento}**")
-            
-        st.divider()
+        # --- FILTROS DE SEGMENTO: REMOVED (Keep it Simple) ---
+
         
         # --- PROFILE CARD (Premium Design) ---
         from src.state import get_user
