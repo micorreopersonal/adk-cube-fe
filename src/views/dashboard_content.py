@@ -9,9 +9,9 @@ ACTION_CARDS = [
     {
         "key": "rotacion",
         "title": "📉 Rotación y Fugas",
-        "caption": "Analiza tendencias de salida y retención.",
+        "caption": "Analiza tendencias del ratio de rotación TOTAL, ADM y FFVV.",
         "button_label": "Ver Análisis de Rotación ➔",
-        "prompt": "Analiza mes a mes la rotación voluntaria e involuntaria del año 2024 y 2025 por cada división (uo2), mostrar el top 5 de divisiones con mayor rotación.",
+        "prompt": "Mostrar un gráfico con la evolución mensual de la tasa de rotación:TOTAL, Voluntaria e Involuntaria, del periodo 2025.",
         "role_required": None # None = Public
     },
     {
@@ -19,7 +19,7 @@ ACTION_CARDS = [
         "title": "⭐ Talento Clave",
         "caption": "Identifica a tus HiPos y Riesgos.",
         "button_label": "Ver Top Talent ➔",
-        "prompt": "Muestra las fugas de talento clave (Hiper/Hipo) registradas en el último mes cerrado.",
+        "prompt": "Muestra las fugas de talento clave (Hiper/Hipo) del 2025",
         "role_required": ["admin", "hr_bp"]
     },
     {
@@ -45,7 +45,7 @@ SUGGESTIONS_COLUMNS = [
             },
             {
                 "label": "•  Comparativo 2024 vs 2025",
-                "prompt": "Genera un gráfico comparativo de la rotación acumulada entre el año 2024 y 2025."
+                "prompt": "Genera un gráfico comparativo mensual de la rotación total, voluntaria e involuntaria entre el año 2024 y 2025."
             }
         ]
     },
@@ -67,7 +67,7 @@ SUGGESTIONS_COLUMNS = [
         "items": [
              {
                 "label": "•  Motivos de Salida",
-                "prompt": "¿Cuáles son los principales motivos de renuncia registrados en el último trimestre de 2025 a nivel de toda la empresa?"
+                "prompt": "¿Cuáles son los principales motivos de cese registrados en el último trimestre de 2025 a nivel de toda la empresa?"
             },
             {
                 "label": "•  Listado de Bajas Recientes",

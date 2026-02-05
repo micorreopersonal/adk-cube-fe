@@ -35,10 +35,11 @@ class Dataset(BaseModel):
 class ChartPayload(BaseModel):
     labels: List[str]
     datasets: List[Dataset]
+    tooltip_datasets: Optional[List[Dataset]] = None
 
 class TablePayload(BaseModel):
     headers: List[str]
-    rows: List[List[Any]]
+    rows: List[Union[List[Any], Dict[str, Any]]]
 
 # --- Block Types ---
 class TextBlockPayload(BaseModel):

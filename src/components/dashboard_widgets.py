@@ -24,7 +24,7 @@ def render_welcome_header(user, api_client):
     with h_col2:
         st.write("") 
         st.write("")
-        if st.button("🗑️ Reiniciar", help="Borrar memoria del agente y limpiar chat", use_container_width=True):
+        if st.button("🗑️ Reiniciar", help="Borrar memoria del agente y limpiar chat", width='stretch'):
              if api_client.reset_session(user):
                  st.session_state.messages = []
                  st.session_state.last_api_response = None
@@ -99,6 +99,6 @@ def render_suggestions_grid():
             st.markdown(f"**{column_data['title']}**")
             for item in column_data['items']:
                 # Usar key única basada en el título y label
-                if st.button(item['label'], key=f"btn_sug_{idx}_{item['label'][:5]}", use_container_width=True):
+                if st.button(item['label'], key=f"btn_sug_{idx}_{item['label'][:5]}", width='stretch'):
                     st.session_state.messages.append({"role": "user", "content": item['prompt']})
                     st.rerun()

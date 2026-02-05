@@ -145,7 +145,7 @@ def _render_debugger():
     st.divider()
     with st.expander("🛠️ Debugger: Comunicación con Backend", expanded=True):
         if "last_api_response" in st.session_state:
-            res = st.session_state.last_api_response
+            res = st.session_state.last_api_response or {}
             
             telemetry = res.get("telemetry", {})
             if telemetry:

@@ -96,7 +96,7 @@ def render_sidebar():
         
         # --- ACTIONS FOOTER ---
         # Botón para limpiar historial
-        if st.button("🗑️ Limpiar Historial", use_container_width=True, type="secondary", help="Borra la conversación actual para iniciar de cero."):
+        if st.button("🗑️ Limpiar Historial", width='stretch', type="secondary", help="Borra la conversación actual para iniciar de cero."):
             st.session_state.messages = []
             st.session_state.messages.append({
                 "role": "assistant", 
@@ -106,5 +106,5 @@ def render_sidebar():
             st.rerun()
 
         st.markdown("<br>", unsafe_allow_html=True)
-        if st.button("Cerrar Sesión", use_container_width=True, type="primary"):
+        if st.button("Cerrar Sesión", width='stretch', type="primary"):
             logout()
