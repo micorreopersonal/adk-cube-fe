@@ -62,6 +62,7 @@ def render_sidebar():
         
         st.divider()
         
+
         st.divider()
         
         # --- VISUAL CONFIGURATION (THEME SETTINGS) ---

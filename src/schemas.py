@@ -54,6 +54,7 @@ class BlockMetadata(BaseModel):
 
 # --- Visual Component Blocks ---
 class VisualBlock(BaseModel):
+    id: Optional[str] = None # Unique ID from backend (e.g., 'header_title_193502')
     type: str # discriminator: KPI_ROW, CHART, TABLE, etc.
     subtype: Optional[str] = None # LINE, BAR, PIE
     

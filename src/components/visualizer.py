@@ -47,7 +47,8 @@ class Visualizer:
                 continue
 
             # --- 2. Block Rendering (With Error Boundary) ---
-            block_key = f"{key_prefix}_{idx}"
+            # Priority: 1. Backend ID, 2. Index-based Key
+            block_key = block.id if block.id else f"{key_prefix}_{idx}"
             
             try:
                 Visualizer._render_block(block, block_key)
@@ -198,10 +199,23 @@ class Visualizer:
                 elif status_val in ["NEUTRAL", "STANDARD", "BLUE"]:
                     delta_color = "off"
                 
+                # Format Value
+                raw_value = item.get("value")
+                formatted_value = raw_value
+                
+                # Auto-format floats or explicit percentages
+                if isinstance(raw_value, float) or item.get("is_percentage"):
+                    fmt = {
+                        "decimals": 2,
+                        "symbol": "%" if item.get("is_percentage") else "",
+                        "unit_type": "percentage" if item.get("is_percentage") else "number"
+                    }
+                    formatted_value = Visualizer.format_metric_value(raw_value, fmt)
+
                 # Render
                 st.metric(
                     label=item.get("label"),
-                    value=item.get("value"),
+                    value=formatted_value,
                     delta=delta_val,
                     delta_color=delta_color,
                     help=item.get("tooltip")
@@ -685,8 +699,32 @@ class Visualizer:
             st.warning("⚠️ Tabla sin datos.")
             return
         
+        # --- NORMALIZATION LAYER ---
+        # Handle cases where columns are defined with accessors (Section 6 format)
+        if isinstance(headers, list) and len(headers) > 0 and isinstance(headers[0], dict):
+            # Format: [{accessor, header}, ...]
+            normalized_headers = [h.get("header", h.get("accessor", "Col")) for h in headers]
+            accessors = [h.get("accessor") for h in headers]
+            
+            # Reconstruct rows if they are dicts based on accessors
+            if isinstance(rows, list) and len(rows) > 0 and isinstance(rows[0], dict):
+                normalized_rows = []
+                for row_dict in rows:
+                    normalized_rows.append([row_dict.get(acc, "") for acc in accessors])
+                rows = normalized_rows
+            headers = normalized_headers
+
         # Create DataFrame
-        df_original = pd.DataFrame(rows, columns=headers)
+        # Safety: If rows are list of dicts, pd.DataFrame handles it directly with columns=headers
+        try:
+            if isinstance(rows, list) and len(rows) > 0 and isinstance(rows[0], dict):
+                df_original = pd.DataFrame(rows, columns=headers)
+            else:
+                df_original = pd.DataFrame(rows, columns=headers)
+        except Exception as e:
+            st.error(f"Error parsing table data: {e}")
+            return
+
         df = df_original.copy()  # Working copy for filters
         
         # --- TITLE (from metadata or can be passed from summary) ---

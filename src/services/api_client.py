@@ -10,7 +10,7 @@ class ApiClient:
         """
         Obtiene el token JWT del backend
         """
-        url = f"{BACKEND_URL}/token" # Endpoint estándar OAuth2
+        url = f"{BACKEND_URL}/api/token" # Endpoint estándar OAuth2 con prefijo /api
         
         # FastAPI OAuth2PasswordBearer espera 'username' y 'password' como form-data
         data = {
@@ -34,7 +34,7 @@ class ApiClient:
         """
         Envía el mensaje al backend usando el TOKEN REAL del usuario.
         """
-        url = f"{BACKEND_URL}/chat"
+        url = f"{BACKEND_URL}/api/chat"
         
         payload = {
             "message": message,
@@ -79,7 +79,7 @@ class ApiClient:
         """
         Llama al endpoint /session/reset para borrar la memoria del agente.
         """
-        url = f"{BACKEND_URL}/session/reset"
+        url = f"{BACKEND_URL}/api/session/reset"
         session_id = f"session-{user.username}"
         
         payload = {
@@ -99,3 +99,4 @@ class ApiClient:
         except Exception as e:
             print(f"Error resetting session: {e}")
             return False
+

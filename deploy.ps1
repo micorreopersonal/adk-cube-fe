@@ -17,7 +17,7 @@ gcloud run deploy $SERVICE_NAME `
     --platform managed `
     --region $REGION `
     --allow-unauthenticated `
-    --set-env-vars "PYTHON_ENV=production" `
+    --set-env-vars "PYTHON_ENV=production,BACKEND_URL=https://adk-people-analytics-backend-828393973311.us-central1.run.app" `
     --memory 1Gi `
     --cpu 1
 

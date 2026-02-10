@@ -20,6 +20,8 @@ def render_dashboard():
     # --- Sidebar ---
     render_sidebar()
 
+
+
     # --- UI Principal ---
     render_welcome_header(user, api_client)
     render_action_cards(user)
