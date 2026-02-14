@@ -10,7 +10,32 @@ class ApiClient:
         """
         Obtiene el token JWT del backend
         """
-        url = f"{BACKEND_URL}/api/token" # Endpoint estándar OAuth2 con prefijo /api
+        url = f"{BACKEND_URL}/token" # Endpoint estándar OAuth2 sin prefijo /api
+        
+        # --- MOCK LOGIN FOR DEMO/DEV ---
+        # Permite entrar sin backend si se usan estas credenciales
+        # if username.lower() == "admin" and password == "p014654":
+        #     return {
+        #         "access_token": "mock-token-admin-001", 
+        #         "token_type": "bearer",
+        #         "user": {
+        #             "username": "admin",
+        #             "role": "admin",
+        #             "name": "Admin User"
+        #         }
+        #     }
+        
+        # if username.lower() == "paul" and password == "admin123":
+        #      return {
+        #         "access_token": "mock-token-paul-002", 
+        #         "token_type": "bearer",
+        #         "user": {
+        #             "username": "paul",
+        #             "role": "admin",
+        #             "name": "Paul"
+        #         }
+        #     }
+        # -------------------------------
         
         # FastAPI OAuth2PasswordBearer espera 'username' y 'password' como form-data
         data = {
@@ -19,22 +44,28 @@ class ApiClient:
         }
         
         try:
+            print(f"🔑 DEBUG LOGIN: Attempting login to {url} with user '{username}'")
             response = requests.post(url, data=data)
+            print(f"🔑 DEBUG LOGIN: Status Code: {response.status_code}")
+            
+            if response.status_code != 200:
+                print(f"🔑 DEBUG LOGIN: Error Response: {response.text}")
+                
             response.raise_for_status()
             return response.json() # Esperamos {"access_token": "...", "token_type": "bearer", "user": {...}}
             
         except requests.exceptions.ConnectionError:
-            print(f"❌ Error de Conexión: No se encuentra el Backend en {BACKEND_URL}")
+            print(f"❌ DEBUG LOGIN: Error de Conexión: No se encuentra el Backend en {BACKEND_URL}")
             return None
         except requests.exceptions.HTTPError as e:
-            print(f"❌ Error HTTP: {e}")
+            print(f"❌ DEBUG LOGIN: Error HTTP: {e}")
             return None
 
     def send_chat(self, message: str, user: UserProfile):
         """
         Envía el mensaje al backend usando el TOKEN REAL del usuario.
         """
-        url = f"{BACKEND_URL}/api/chat"
+        url = f"{BACKEND_URL}/chat"
         
         payload = {
             "message": message,
@@ -51,6 +82,10 @@ class ApiClient:
             "Authorization": f"Bearer {user.token}", 
             "Content-Type": "application/json"
         }
+
+        # --- DEBUG: TOKEN VISIBILITY ---
+        # print(f"🔑 DEBUG: Headers being sent to {url}:")
+        # -------------------------------
 
         try:
             # Enviamos la petición POST

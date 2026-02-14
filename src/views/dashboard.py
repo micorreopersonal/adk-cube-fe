@@ -41,7 +41,7 @@ def render_dashboard():
             if isinstance(msg["content"], list):
                 summary = msg.get("summary", "")
                 if summary:
-                    st.markdown(f"### 📊 {summary}")
+                    st.info(summary, icon="📊")
                     st.divider()
             
             with st.chat_message("assistant"):
@@ -131,7 +131,21 @@ def _process_response_data(response_data):
 
     # 3. Guardar en Historial
     if is_visual:
-        summary = response_data.get("summary", "")
+        # --- EXTRACT ALERT/SUMMARY HIGHLIGHT ---
+        # Prioritize explicit 'alert_highlight' or 'summary' keys for the Blue Banner.
+        # We do NOT fallback to 'response' locally to avoid duplication.
+        summary = response_data.get("alert_highlight") or response_data.get("summary", "")
+        
+        # --- DEBUG: TRACE SUMMARY ---
+        # print(f"🔍 DEBUG SUMMARY: Extracted summary = '{summary[:100]}...'")
+        # ---------------------------
+        
+        # --- DISPLAY SUMMARY IMMEDIATELY (OUTSIDE CHAT BUBBLE) ---
+        if summary:
+            st.info(summary, icon="📊")
+            st.divider()
+        # ------------------------------------------------
+        
         st.session_state.messages.append({
             "role": "assistant", 
             "content": content_payload,
