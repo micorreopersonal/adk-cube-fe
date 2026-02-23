@@ -31,6 +31,7 @@ class Dataset(BaseModel):
     type: Optional[str] = None # 'line', 'bar' override
     color: Optional[str] = None
     format: Optional[MetricFormat] = None  # ✨ NEW: Dynamic formatting
+    related_datasets: Optional[List['Dataset']] = None  # ✨ NEW: Per-series tooltips
 
 class ChartPayload(BaseModel):
     labels: List[str]

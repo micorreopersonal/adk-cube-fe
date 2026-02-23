@@ -465,13 +465,18 @@ class Visualizer:
         # 2. Reconstruct labels from indices (Safe method)
         filtered_labels = [labels[i] for i in indices]
         
-        # Function to filter a list of datasets
+        # Function to filter a list of datasets (handling nested related_datasets)
         def filter_ds_list(ds_list, idxs):
             filtered = []
             for ds in ds_list:
                 new_ds = ds.copy()
                 source_data = ds.get("data", [])
                 new_ds["data"] = [source_data[i] for i in idxs if i < len(source_data)]
+                
+                # Recursively filter related_datasets if they exist
+                if ds.get("related_datasets"):
+                    new_ds["related_datasets"] = filter_ds_list(ds["related_datasets"], idxs)
+                    
                 filtered.append(new_ds)
             return filtered
 
@@ -520,9 +525,16 @@ class Visualizer:
                     unzipped = list(zip(*combined_data))
                     filtered_labels = list(unzipped[0])
                     
-                    # Distribute back to main datasets
+                    # Distribute back to main datasets (including their related_datasets)
                     for idx, ds in enumerate(filtered_datasets):
                         ds["data"] = list(unzipped[idx+1])
+                        # Handle sorting for related_datasets if they exist
+                        if ds.get("related_datasets"):
+                            # This is complex because related_datasets are nested. 
+                            # We need to apply the SAME sorting to them.
+                            # For simplicity in this logic, we'll re-filter them using the new order of labels
+                            indices_new = [labels.index(l) for l in filtered_labels]
+                            ds["related_datasets"] = filter_ds_list(payload.get("datasets", [])[idx].get("related_datasets", []), indices_new)
                     
                     # Distribute back to tooltip datasets
                     for idx, ds in enumerate(filtered_tooltip_datasets):
@@ -587,13 +599,29 @@ class Visualizer:
                         if hasattr(ds_format, "dict"): ds_format = ds_format.dict()
                         val_suffix = "%" if ds_format and ds_format.get("unit_type") == "percentage" else ""
 
+                        # --- SERIES-SPECIFIC TOOLTIPS ---
+                        # If the dataset has related_datasets, we build a specific tooltip for this series
+                        current_series_tooltips = tooltip_strings.copy() # Start with global ones
+                        
+                        if ds.get("related_datasets"):
+                             for rds in ds["related_datasets"]:
+                                 r_label = rds.get("label", "Métrica")
+                                 r_data = rds.get("data", [])
+                                 r_fmt = rds.get("format")
+                                 if hasattr(r_fmt, "dict"): r_fmt = r_fmt.dict()
+                                 
+                                 for i, val in enumerate(r_data):
+                                     if i < num_points:
+                                         val_fmt = Visualizer.format_metric_value(val, r_fmt)
+                                         current_series_tooltips[i] += f"<br><b>{r_label}:</b> {val_fmt}"
+
                         if chart_type_target == "BAR":
                             fig.add_trace(go.Bar(
                                 x=filtered_labels,
                                 y=ds_data,
                                 name=ds_label,
                                 marker_color=color,
-                                customdata=tooltip_strings,
+                                customdata=current_series_tooltips,
                                 text=[Visualizer.format_metric_value(v, ds_format) for v in ds_data],
                                 textposition="auto",
                                 hovertemplate=f"<b>{ds_label}</b><br>Dimensión: %{{x}}<br>Valor: %{{y}}{val_suffix}%{{customdata}}<extra></extra>"
@@ -606,7 +634,7 @@ class Visualizer:
                                 name=ds_label,
                                 line=dict(color=color, width=3),
                                 marker=dict(size=8),
-                                customdata=tooltip_strings,
+                                customdata=current_series_tooltips,
                                 text=[Visualizer.format_metric_value(v, ds_format) for v in ds_data],
                                 textposition="top center",
                                 hovertemplate=f"<b>{ds_label}</b><br>Dimensión: %{{x}}<br>Valor: %{{y}}{val_suffix}%{{customdata}}<extra></extra>"
